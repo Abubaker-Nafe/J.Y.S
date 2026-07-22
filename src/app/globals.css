@@ -1,0 +1,158 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-strong: var(--surface-strong);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-accent: var(--accent);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
+  --shadow-soft: 0 16px 50px rgb(28 25 23 / 0.08);
+  --shadow-lift: 0 24px 70px rgb(28 25 23 / 0.14);
+}
+
+:root {
+  --canvas: #f4f0e8;
+  --surface: #fbf9f4;
+  --surface-strong: #ffffff;
+  --ink: #1d1b19;
+  --muted: #716c64;
+  --line: #d8d1c5;
+  --brand: #313334;
+  --brand-strong: #171819;
+  --accent: #7d272d;
+  --success: #23583f;
+  --warning: #9b6116;
+  --font-sans: "Segoe UI", Tahoma, Arial, sans-serif;
+  --font-display: Georgia, "Times New Roman", serif;
+  color-scheme: light;
+}
+
+* {
+  border-color: var(--line);
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--canvas);
+  scroll-behavior: smooth;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(circle at 15% 0%, rgb(125 39 45 / 0.045), transparent 34rem),
+    var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+[lang="ar"],
+[dir="rtl"] {
+  font-family: Tahoma, Arial, sans-serif;
+  letter-spacing: 0;
+}
+
+::selection {
+  background: var(--accent);
+  color: white;
+}
+
+:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 70%, white);
+  outline-offset: 3px;
+}
+
+a,
+button,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+button:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+img {
+  height: auto;
+  max-width: 100%;
+}
+
+.container-shell {
+  width: min(100% - 2rem, 88rem);
+  margin-inline: auto;
+}
+
+.text-balance {
+  text-wrap: balance;
+}
+
+.text-pretty {
+  text-wrap: pretty;
+}
+
+.surface-grid {
+  background-image:
+    linear-gradient(rgb(49 51 52 / 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(49 51 52 / 0.035) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.scrollbar-subtle {
+  scrollbar-color: var(--line) transparent;
+  scrollbar-width: thin;
+}
+
+/* Keep secondary copy readable on the dark storefront panels. */
+.bg-brand-strong .text-white\/60,
+.bg-brand-strong .text-white\/65 {
+  color: rgb(255 255 255 / 0.82);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media print {
+  [data-no-print] {
+    display: none !important;
+  }
+
+  body {
+    background: white;
+    color: black;
+  }
+}

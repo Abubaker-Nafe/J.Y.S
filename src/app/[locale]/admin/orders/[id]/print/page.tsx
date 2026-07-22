@@ -1,0 +1,13 @@
+import { notFound } from "next/navigation";
+import { PrintButton } from "@/components/admin/PrintButton";
+import { PageHeader, adminStyles as styles } from "@/components/admin/AdminUi";
+import { formatAdminDate, formatMoney } from "@/lib/admin/format";
+import { getAdminLocale, localizedText } from "@/lib/admin/i18n";
+import { getOrder } from "@/lib/admin/repository";
+
+export default async function PrintOrderPage({ params }: { params: Promise<{ locale: string; id: string }> }) {
+  const { locale: value, id } = await params; const locale = getAdminLocale(value); const order = await getOrder(id); if (!order) notFound();
+  const address = [localizedText(locale, order.cityNameAr, order.cityNameEn), localizedText(locale, order.areaNameAr, order.areaNameEn), order.address, order.locationDescription].filter((item) => item && item !== "—").join("، ");
+  return <><PageHeader title={`JYS · ${order.orderNumber}`} description={formatAdminDate(order.createdAt, locale, true)} actions={<PrintButton locale={locale} />} /><section className={styles.card}><dl className={styles.details}><Detail label={locale === "ar" ? "العميل" : "Customer"} value={order.customerName} /><Detail label={locale === "ar" ? "الهاتف" : "Phone"} value={order.customerPhone} /><Detail label={locale === "ar" ? "طريقة الاستلام" : "Fulfillment"} value={order.fulfillmentMethod === "DELIVERY" ? (locale === "ar" ? "توصيل" : "Delivery") : (locale === "ar" ? "استلام" : "Pickup")} /><Detail label={locale === "ar" ? "العنوان" : "Address"} value={address || "—"} /></dl></section><div className={`${styles.tableWrap} ${styles.sectionGap}`}><table className={styles.table}><thead><tr><th>{locale === "ar" ? "المنتج" : "Product"}</th><th>{locale === "ar" ? "الخيار" : "Variant"}</th><th>{locale === "ar" ? "الكمية" : "Quantity"}</th><th>{locale === "ar" ? "الإجمالي" : "Total"}</th></tr></thead><tbody>{order.items.map((item) => <tr key={item.id}><td>{localizedText(locale, item.productNameAr, item.productNameEn)}<span className={styles.secondaryText}>{item.sku}</span></td><td>{localizedText(locale, item.variantLabelAr, item.variantLabelEn)}</td><td>{item.quantity}</td><td>{formatMoney(item.lineTotal, locale, order.currency)}</td></tr>)}</tbody><tfoot><tr><th colSpan={3}>{locale === "ar" ? "الإجمالي النهائي" : "Final total"}</th><td><strong>{formatMoney(order.total, locale, order.currency)}</strong></td></tr></tfoot></table></div>{order.notes ? <section className={`${styles.card} ${styles.sectionGap}`}><strong>{locale === "ar" ? "ملاحظات:" : "Notes:"}</strong><p>{order.notes}</p></section> : null}</>;
+}
+function Detail({ label, value }: { label: string; value: string }) { return <div><dt>{label}</dt><dd>{value}</dd></div>; }

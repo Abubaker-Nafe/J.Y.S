@@ -1,0 +1,120 @@
+import type { AdminLocale } from "./types";
+
+export function getAdminLocale(value: string): AdminLocale {
+  return value === "ar" ? "ar" : "en";
+}
+
+export const adminMessages = {
+  en: {
+    brand: "JYS Admin",
+    section: "Operations console",
+    dashboard: "Dashboard",
+    products: "Products",
+    newProduct: "New product",
+    categories: "Categories",
+    inventory: "Inventory",
+    orders: "Orders",
+    customers: "Customers",
+    locations: "Cities & fees",
+    reports: "Reports",
+    content: "Content",
+    settings: "Settings",
+    storefront: "View storefront",
+    navigation: "Admin navigation",
+    openMenu: "Open navigation",
+    closeMenu: "Close navigation",
+    search: "Search",
+    filter: "Filter",
+    clear: "Clear",
+    save: "Save changes",
+    saving: "Saving…",
+    cancel: "Cancel",
+    edit: "Edit",
+    archive: "Archive",
+    restore: "Restore",
+    active: "Active",
+    inactive: "Inactive",
+    featured: "Featured",
+    actions: "Actions",
+    status: "Status",
+    empty: "No results match the current filters.",
+    tryAgain: "Try again",
+    loading: "Loading admin data…",
+    unauthorized: "Administrator access is required.",
+    previous: "Previous",
+    next: "Next",
+    page: "Page",
+    of: "of",
+    exportCsv: "Export CSV",
+    print: "Print order sheet",
+    required: "Required",
+  },
+  ar: {
+    brand: "إدارة JYS",
+    section: "لوحة العمليات",
+    dashboard: "لوحة المعلومات",
+    products: "المنتجات",
+    newProduct: "منتج جديد",
+    categories: "التصنيفات",
+    inventory: "المخزون",
+    orders: "الطلبات",
+    customers: "العملاء",
+    locations: "المدن ورسوم التوصيل",
+    reports: "التقارير",
+    content: "المحتوى",
+    settings: "الإعدادات",
+    storefront: "عرض المتجر",
+    navigation: "تنقل لوحة الإدارة",
+    openMenu: "فتح قائمة التنقل",
+    closeMenu: "إغلاق قائمة التنقل",
+    search: "بحث",
+    filter: "تصفية",
+    clear: "مسح",
+    save: "حفظ التغييرات",
+    saving: "جارٍ الحفظ…",
+    cancel: "إلغاء",
+    edit: "تعديل",
+    archive: "أرشفة",
+    restore: "استعادة",
+    active: "نشط",
+    inactive: "غير نشط",
+    featured: "مميز",
+    actions: "الإجراءات",
+    status: "الحالة",
+    empty: "لا توجد نتائج مطابقة لعوامل التصفية الحالية.",
+    tryAgain: "المحاولة مجددًا",
+    loading: "جارٍ تحميل بيانات الإدارة…",
+    unauthorized: "يلزم تسجيل الدخول بصلاحية مدير.",
+    previous: "السابق",
+    next: "التالي",
+    page: "صفحة",
+    of: "من",
+    exportCsv: "تصدير CSV",
+    print: "طباعة ورقة الطلب",
+    required: "مطلوب",
+  },
+} as const;
+
+export function localizedText(locale: AdminLocale, ar: string | null | undefined, en: string | null | undefined) {
+  return locale === "ar" ? ar || en || "—" : en || ar || "—";
+}
+
+const orderStatuses = {
+  NEW: ["جديد", "New"],
+  CONFIRMED: ["مؤكد", "Confirmed"],
+  PREPARING: ["قيد التحضير", "Preparing"],
+  READY_FOR_DELIVERY: ["جاهز للتوصيل", "Ready for delivery"],
+  SENT_TO_DELIVERY_COMPANY: ["أُرسل لشركة التوصيل", "Sent to delivery company"],
+  DELIVERED: ["تم التوصيل", "Delivered"],
+  READY_FOR_PICKUP: ["جاهز للاستلام", "Ready for pickup"],
+  COLLECTED: ["تم الاستلام", "Collected"],
+  CANCELLED: ["ملغي", "Cancelled"],
+  PENDING: ["معلق", "Pending"],
+  PAID: ["مدفوع", "Paid"],
+} satisfies Record<string, readonly [string, string]>;
+
+export function adminStatusLabel(locale: AdminLocale, status: string) {
+  const pair = orderStatuses[status as keyof typeof orderStatuses];
+  if (!pair) return status.replaceAll("_", " ").toLocaleLowerCase(locale === "ar" ? "ar" : "en");
+  return locale === "ar" ? pair[0] : pair[1];
+}

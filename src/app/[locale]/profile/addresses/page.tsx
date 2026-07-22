@@ -1,0 +1,2 @@
+import{notFound}from"next/navigation";import{isLocale}from"@/lib/i18n/config";import{getStorefrontLocations}from"@/lib/catalog/locations";import{AddressManager}from"@/components/storefront/address-manager";export default async function Page({params}:{params:Promise<{locale:string}>}){const{locale}=await params;if(!isLocale(locale))notFound();const locations=await getStorefrontLocations(locale);return <AddressManager locale={locale} locations={locations}/>}
+

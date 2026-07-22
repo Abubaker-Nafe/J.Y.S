@@ -1,0 +1,3 @@
+import { notFound } from "next/navigation";import { isLocale } from "@/lib/i18n/config";import { OrderConfirmationClient } from "@/components/storefront/order-confirmation-client";
+export default async function ConfirmationPage({params,searchParams}:{params:Promise<{locale:string;orderNumber:string}>;searchParams:Promise<{id?:string}>}){const[{locale:raw,orderNumber},query]=await Promise.all([params,searchParams]);if(!isLocale(raw))notFound();return <div className="container-shell max-w-3xl py-12 md:py-20"><OrderConfirmationClient locale={raw} orderNumber={decodeURIComponent(orderNumber)} orderId={query.id}/></div>}
+

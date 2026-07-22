@@ -1,0 +1,37 @@
+# dependencies
+/node_modules/
+/.pnp
+.pnp.*
+
+# Next.js and test output
+/.next/
+/out/
+/dist/
+/coverage/
+/playwright-report/
+/test-results/
+/tmp/
+
+# production and local environment
+.env
+.env.*
+!.env.example
+
+# local uploads (keep the marker only)
+/public/uploads/*
+!/public/uploads/.gitkeep
+
+# logs and OS/editor files
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Prisma local artifacts
+*.db
+*.db-journal
+
+# generated caches
+*.tsbuildinfo
+.npm-cache/

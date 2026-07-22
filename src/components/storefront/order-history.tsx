@@ -1,0 +1,21 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { ArrowUpRight, LoaderCircle, PackageSearch, Truck } from "lucide-react";
+import type { Locale } from "@/lib/i18n/config";
+import { translate } from "@/lib/i18n/dictionaries";
+import { formatDate, formatMoney } from "@/lib/i18n/format";
+import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
+
+interface OrderSummary { id: string; orderNumber: string; status: string; paymentStatus: string; fulfillmentMethod: "DELIVERY" | "PICKUP"; total: string; currency: string; createdAt: string; _count: { items: number } }
+function statusLabel(status: string, locale: Locale) { const key = status === "NEW" ? "status.new" : status === "CONFIRMED" ? "status.confirmed" : status === "PREPARING" ? "status.preparing" : status === "DELIVERED" ? "status.delivered" : status === "COLLECTED" ? "status.collected" : status === "CANCELLED" ? "status.cancelled" : "status.ready"; return translate(locale, key); }
+
+export function OrderHistory({ locale }: { locale: Locale }) {
+  const [orders, setOrders] = useState<OrderSummary[]>([]); const [loading, setLoading] = useState(true); const [error, setError] = useState("");
+  useEffect(() => { const controller = new AbortController(); void fetch("/api/account/orders", { signal: controller.signal, cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(); const payload = await response.json() as { orders: OrderSummary[] }; setOrders(payload.orders); }).catch((reason: unknown) => { if (!(reason instanceof DOMException && reason.name === "AbortError")) setError(locale === "ar" ? "تعذر تحميل الطلبات من حسابك." : "Orders could not be loaded from your account."); }).finally(() => setLoading(false)); return () => controller.abort(); }, [locale]);
+  if (loading) return <div className="grid min-h-64 place-items-center" role="status" aria-live="polite"><LoaderCircle className="size-7 animate-spin text-accent" aria-hidden="true" /><span className="sr-only">{translate(locale, "common.loading")}</span></div>;
+  if (error) return <p role="alert" className="rounded-2xl bg-red-50 p-5 font-semibold text-red-800">{error}</p>;
+  return <section><div><h2 className="font-display text-3xl font-semibold">{translate(locale, "orders.title")}</h2><p className="mt-2 text-sm text-muted">{locale === "ar" ? "تابع الحالة والتفاصيل من سجل الطلب الأصلي." : "Track status and details from the original order record."}</p></div><div className="mt-6">{orders.length ? <div className="space-y-4">{orders.map((order) => <article key={order.id} className="rounded-2xl border border-line bg-surface-strong p-5 transition hover:border-ink/20 hover:shadow-soft"><div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between"><div className="flex gap-4"><span className="grid size-12 shrink-0 place-items-center rounded-xl bg-brand-strong text-white">{order.fulfillmentMethod === "DELIVERY" ? <Truck className="size-5" /> : <PackageSearch className="size-5" />}</span><div><p className="font-mono text-sm font-black" dir="ltr">{order.orderNumber}</p><p className="mt-1 text-xs text-muted">{formatDate(order.createdAt, locale)} · {order._count.items} {translate(locale, "common.items")}</p><div className="mt-2"><Badge tone={order.status === "CANCELLED" ? "danger" : order.status === "DELIVERED" || order.status === "COLLECTED" ? "success" : "warning"}>{statusLabel(order.status, locale)}</Badge></div></div></div><div className="flex items-center justify-between gap-5 sm:justify-end"><strong className="text-lg">{formatMoney(Number(order.total), locale, order.currency)}</strong><Link href={`/${locale}/profile/orders/${order.id}`} aria-label={`${translate(locale, "common.details")} ${order.orderNumber}`} className="grid size-11 place-items-center rounded-full border border-line hover:bg-canvas"><ArrowUpRight className="size-4 rtl:-scale-x-100" /></Link></div></div></article>)}</div> : <EmptyState title={translate(locale, "orders.empty")} text={translate(locale, "orders.emptyText")} actionLabel={translate(locale, "common.shopNow")} actionHref={`/${locale}/products`} />}</div></section>;
+}
