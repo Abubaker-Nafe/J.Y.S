@@ -37,11 +37,13 @@ function serializeCart(cart: CartWithItems | null, currency: string) {
     const availability = getProductAvailability({
       status: item.product.status,
       archivedAt: item.product.archivedAt,
+      isAvailable: item.product.isAvailable,
       stockQuantity: item.product.stockQuantity,
       hasVariants: item.product.variants.length > 0,
       variant: item.variant
         ? {
             belongsToProduct: item.variant.productId === item.productId,
+            isActive: item.variant.isActive,
             isAvailable: item.variant.isAvailable,
             stockQuantity: item.variant.stockQuantity,
           }
@@ -104,11 +106,13 @@ export async function addCartItem(userId: string, input: AddCartItemInput) {
     const availability = getProductAvailability({
       status: product.status,
       archivedAt: product.archivedAt,
+      isAvailable: product.isAvailable,
       stockQuantity: product.stockQuantity,
       hasVariants: product.variants.length > 0,
       variant: variant
         ? {
             belongsToProduct: true,
+            isActive: variant.isActive,
             isAvailable: variant.isAvailable,
             stockQuantity: variant.stockQuantity,
           }
@@ -152,11 +156,13 @@ export async function updateCartItem(userId: string, itemId: string, quantity: n
     const availability = getProductAvailability({
       status: item.product.status,
       archivedAt: item.product.archivedAt,
+      isAvailable: item.product.isAvailable,
       stockQuantity: item.product.stockQuantity,
       hasVariants: item.product.variants.length > 0,
       variant: item.variant
         ? {
             belongsToProduct: item.variant.productId === item.productId,
+            isActive: item.variant.isActive,
             isAvailable: item.variant.isAvailable,
             stockQuantity: item.variant.stockQuantity,
           }

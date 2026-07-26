@@ -45,8 +45,17 @@ export async function createSessionToken(user: SessionUser): Promise<string> {
     .sign(getSessionSecret());
 }
 
+function hasCanonicalJwtEncoding(token: string) {
+  const segments = token.split(".");
+  return segments.length === 3 && segments.every((segment) => {
+    if (!segment || !/^[A-Za-z0-9_-]+$/.test(segment)) return false;
+    return Buffer.from(segment, "base64url").toString("base64url") === segment;
+  });
+}
+
 export async function readSessionToken(token: string): Promise<AuthSession | null> {
   try {
+    if (!hasCanonicalJwtEncoding(token)) return null;
     const { payload } = await jwtVerify(token, getSessionSecret(), {
       algorithms: ["HS256"],
     });

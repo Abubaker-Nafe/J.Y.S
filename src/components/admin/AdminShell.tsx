@@ -191,7 +191,7 @@ export function AdminShell({ locale, actor, children }: { locale: AdminLocale; a
               <span>{actor.email}</span>
             </div>
           </header>
-          <main id="admin-main" className={styles.main} tabIndex={-1}>{children}</main>
+          <div id="admin-main" className={styles.main} tabIndex={-1}>{children}</div>
         </div>
       </div>
     </div>

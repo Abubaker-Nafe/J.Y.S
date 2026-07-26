@@ -27,7 +27,8 @@ export const productVariantSchema = z.object({
   labelEn: bilingualShort,
   priceOverride: money.nullable(),
   stock: quantity,
-  active: z.boolean(),
+  available: z.boolean().default(true),
+  active: z.boolean().default(true),
 });
 
 export const productMutationSchema = z.object({
@@ -41,6 +42,7 @@ export const productMutationSchema = z.object({
   stock: quantity,
   lowStockThreshold: quantity.max(100_000),
   categoryId: cuid,
+  available: z.boolean().default(true),
   active: z.boolean(),
   featured: z.boolean(),
   images: z.array(productImageSchema).max(12).superRefine((images, context) => {
@@ -69,8 +71,17 @@ export const categoryMutationSchema = z.object({
 export const inventoryAdjustmentSchema = z.object({
   productId: cuid,
   variantId: cuid.nullable().optional(),
-  quantityDelta: z.coerce.number().int().min(-1_000_000).max(1_000_000).refine((value) => value !== 0, "Adjustment cannot be zero"),
+  mode: z.enum(["DELTA", "SET_EXACT"]).default("DELTA"),
+  quantityDelta: z.coerce.number().int().min(-1_000_000).max(1_000_000).optional(),
+  targetStock: z.coerce.number().int().min(0).max(10_000_000).optional(),
   reason: z.string().trim().min(3).max(500),
+}).superRefine((value, context) => {
+  if (value.mode === "DELTA" && (!value.quantityDelta || value.quantityDelta === 0)) {
+    context.addIssue({ code: "custom", path: ["quantityDelta"], message: "Adjustment cannot be zero" });
+  }
+  if (value.mode === "SET_EXACT" && value.targetStock === undefined) {
+    context.addIssue({ code: "custom", path: ["targetStock"], message: "Exact stock value is required" });
+  }
 });
 
 export const orderMutationSchema = z.object({
@@ -112,6 +123,7 @@ export const reportQuerySchema = z.object({
   categoryId: z.string().trim().max(64).optional().default(""),
   fulfillment: z.enum(["ALL", "DELIVERY", "PICKUP"]).default("ALL"),
   payment: z.enum(["ALL", "CASH_ON_DELIVERY", "CASH_ON_PICKUP"]).default("ALL"),
+  paymentStatus: z.enum(["ALL", "PENDING", "PAID", "CANCELLED"]).default("ALL"),
   group: z.enum(["day", "week", "month"]).default("day"),
 }).refine((value) => !value.from || !value.to || value.from <= value.to, { path: ["to"], message: "End date must not precede start date" });
 

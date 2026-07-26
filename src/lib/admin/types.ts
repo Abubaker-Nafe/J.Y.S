@@ -33,8 +33,11 @@ export type AdminProductSummary = {
   price: number;
   stock: number;
   lowStockThreshold: number;
+  status: string;
+  available: boolean;
   active: boolean;
   featured: boolean;
+  variationCount: number;
   archivedAt: string | null;
   categoryNameAr: string;
   categoryNameEn: string;
@@ -64,6 +67,7 @@ export type AdminProductDetail = AdminProductSummary & {
     labelEn: string;
     priceOverride: number | null;
     stock: number;
+    available: boolean;
     active: boolean;
   }>;
 };
@@ -93,6 +97,23 @@ export type AdminInventoryRow = {
   stock: number;
   lowStockThreshold: number;
   active: boolean;
+};
+
+export type AdminInventoryAdjustment = {
+  id: string;
+  productId: string;
+  variantId: string | null;
+  productNameAr: string;
+  productNameEn: string;
+  sku: string;
+  variantAr: string | null;
+  variantEn: string | null;
+  previousStock: number | null;
+  quantityDelta: number;
+  newStock: number | null;
+  reason: string;
+  admin: string;
+  createdAt: string;
 };
 
 export type AdminOrderSummary = {
@@ -180,12 +201,15 @@ export type AdminReportData = {
   categoryId: string;
   fulfillment: string;
   payment: string;
+  paymentStatus: string;
   group: "day" | "week" | "month";
   metrics: {
     revenue: number;
     orderCount: number;
     averageOrderValue: number;
     fulfilledOrders: number;
+    deliveredOrders: number;
+    collectedOrders: number;
     cancelledOrders: number;
     deliveryOrders: number;
     pickupOrders: number;
@@ -195,6 +219,22 @@ export type AdminReportData = {
     abandonedCarts: number;
   };
   salesSeries: Array<{ period: string; revenue: number; orders: number }>;
+  orders: Array<{
+    orderNumber: string;
+    createdAt: string;
+    customerName: string;
+    customerEmail: string;
+    customerPhone: string;
+    fulfillmentMethod: string;
+    paymentMethod: string;
+    paymentStatus: string;
+    status: string;
+    currency: string;
+    subtotal: number;
+    deliveryFee: number;
+    total: number;
+    itemCount: number;
+  }>;
   products: Array<{
     id: string;
     sku: string;
@@ -206,6 +246,11 @@ export type AdminReportData = {
     wishlists: number;
     cartAdds: number;
     stock: number;
+    lowStockThreshold: number;
+    categoryAr: string;
+    categoryEn: string;
+    active: boolean;
+    available: boolean;
   }>;
   categories: Array<{
     id: string;
@@ -218,8 +263,12 @@ export type AdminReportData = {
     id: string;
     name: string;
     email: string;
+    phone: string;
+    cityAr: string | null;
+    cityEn: string | null;
     orderCount: number;
     spending: number;
+    joinedAt: string;
     lastOrderAt: string | null;
   }>;
   insights: Array<{ key: string; titleAr: string; titleEn: string; detailAr: string; detailEn: string }>;

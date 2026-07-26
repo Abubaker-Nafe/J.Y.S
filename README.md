@@ -9,7 +9,7 @@ The application intentionally does **not** implement appointments, online paymen
 ## What is included
 
 - Arabic and English locale routes with RTL/LTR layout and a remembered language choice.
-- Responsive storefront: home, categories, search/filter/sort, product detail, variations, stock-aware cart, wishlist, and useful empty/error/loading states.
+- Responsive storefront: home, a bilingual category directory plus accessible desktop/mobile category navigation, search/filter/sort, product detail, variations, database-revalidated cart/wishlist, and useful empty/error/loading states.
 - Account flows: registration, login/logout, generic forgot-password response, expiring reset token, profile, addresses, and protected order history/detail.
 - Cash-only delivery and pickup checkout with server-recalculated prices, area fees, stock validation, terms acceptance, immutable order snapshots, and readable order numbers.
 - Inventory rules: deduct once on confirmation, restore once on cancellation, transition validation, adjustment audit trail, and concurrency-safe transactions.
@@ -103,6 +103,8 @@ npm.cmd run dev
 
 Open `http://localhost:3000`. The root redirects to the remembered locale, defaulting to English. Arabic is available at `/ar` and English at `/en`.
 
+For the optional Windows hosts-file alias `127.0.0.1 jys.com`, set `DEV_ALLOWED_ORIGINS="jys.com"` in `.env`, restart `npm.cmd run dev`, and open `http://jys.com:3000`. Keep `APP_URL` and `NEXT_PUBLIC_APP_URL` at `http://localhost:3000` for the default local origin. Browser API requests are relative and remain on whichever host you opened; authentication cookies are intentionally host-only, so sign in separately on `localhost` and `jys.com`.
+
 ## Development credentials
 
 The seed reads credentials from `.env`. The safe development defaults shown in `.env.example` are:
@@ -123,6 +125,7 @@ npm.cmd test
 npm.cmd run test:coverage
 npx.cmd playwright install chromium
 npm.cmd run test:e2e
+npm.cmd run test:e2e:hosts
 npm.cmd run build
 npm.cmd run start
 ```
@@ -138,11 +141,30 @@ npm.cmd run db:seed
 npm.cmd run db:studio
 ```
 
+## Verified Admin Workflows
+
+Use the seeded administrator credentials from your local `.env`. A normal administrator login now opens `/{locale}/admin` automatically, and the dashboard icon in the storefront header or **Admin dashboard** item in the account navigation returns to it later. These entries are rendered only for an authenticated `ADMIN`. An authenticated customer who manually enters an admin URL is returned to their account; unauthenticated visitors are sent to login. Replace `en` with `ar` for the Arabic/RTL admin route. All routes below are protected on the server.
+
+| Workflow | Exact route | Verified steps |
+| --- | --- | --- |
+| Add a product | `/en/admin/products/new` | Open **Products** → **Add product**; enter bilingual content, SKU/slug/category/price/initial stock/states; optionally upload/reorder images or add variants; select **Save changes**. The successful database E2E redirects to the new edit route. |
+| Edit a product | `/en/admin/products/[id]` | Open a row from `/en/admin/products`; edit metadata or availability; save. Existing stock is deliberately read-only here and remains ledger-owned. The E2E verifies the storefront update and unavailable 404 state. |
+| Adjust stock | `/en/admin/inventory` | Search a product/variant; select **Adjust stock**; choose delta or exact value; enter a reason; save. The page refreshes current stock and shows previous/delta/new/admin/time in adjustment history. |
+| Confirm an order | `/en/admin/orders/[id]` | Open an order from `/en/admin/orders`; choose **Confirmed** and save. The server validates the transition and deducts inventory once. |
+| Cancel an order | `/en/admin/orders/[id]` | Choose **Cancelled** and save. If inventory was deducted, it is restored once; a repeated cancellation does not duplicate the ledger row. |
+| Edit shop settings | `/en/admin/settings` | Edit identity, contact, location, hours, currency, default threshold, or homepage promotion; select **Save settings**. Public database values refresh after save. |
+| Edit policies/instructions | `/en/admin/content` | Select Terms, Privacy, No-return, Warranty, Delivery, or Pickup; edit Arabic/English title and content; publish/save. Public policy pages read this record. |
+| Open reports | `/en/admin/reports` | Apply date, order/payment status, fulfillment, category, and day/week/month filters; submit to refresh database-backed metrics, tables, chart data, and insights. |
+| Export CSV | `/en/admin/reports` | Apply filters, then select **Export orders**, **sales**, **products**, **inventory**, or **customers**. Downloads are admin-authorized UTF-8 CSV files and retain the active filters. |
+
+The mobile admin drawer was verified against Products, Add product, Inventory, Orders, Customers, Cities & fees, Content, Settings, and Reports. The full automated paths are in `e2e/database.spec.ts`.
+
 ## Environment variables
 
 `.env.example` is the canonical inventory. Important groups are:
 
 - Required for persistent operation: `DATABASE_URL`, `AUTH_SECRET`, `APP_URL`, `NEXT_PUBLIC_APP_URL`.
+- Optional local hostname aliases: `DEV_ALLOWED_ORIGINS` (comma-separated hostnames only).
 - Optional locally but required for production email: `EMAIL_PROVIDER`, `EMAIL_FROM_NAME`, `EMAIL_FROM_ADDRESS`, `RESEND_API_KEY`.
 - Image adapter: `IMAGE_STORAGE_DRIVER=local` and `MAX_IMAGE_SIZE_MB`. The shipped adapter uses the fixed mountable path `public/uploads`; `ImageStorage` is the extension point for a future object-storage implementation.
 - Development seed only: `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`, `SEED_CUSTOMER_EMAIL`, `SEED_CUSTOMER_PASSWORD`.

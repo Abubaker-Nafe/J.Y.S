@@ -21,8 +21,20 @@ function createOrderNumber(now = new Date()): string {
   return `JYS-${date}-${randomBytes(3).toString("hex").toUpperCase()}`;
 }
 
+async function serializableTransaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await db.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      const retryable = error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034";
+      if (!retryable || attempt === 3) throw error;
+    }
+  }
+  throw new Error("Serializable transaction retry exhausted");
+}
+
 export async function createOrderFromCart(userId: string, input: CheckoutInput) {
-  const order = await db.$transaction(
+  const order = await serializableTransaction(
     async (tx) => {
       const user = await tx.user.findFirst({
         where: { id: userId, status: "ACTIVE" },
@@ -84,11 +96,13 @@ export async function createOrderFromCart(userId: string, input: CheckoutInput) 
         const availability = getProductAvailability({
           status: item.product.status,
           archivedAt: item.product.archivedAt,
+          isAvailable: item.product.isAvailable,
           stockQuantity: item.product.stockQuantity,
           hasVariants: item.product.variants.length > 0,
           variant: item.variant
             ? {
                 belongsToProduct: item.variant.productId === item.productId,
+                isActive: item.variant.isActive,
                 isAvailable: item.variant.isAvailable,
                 stockQuantity: item.variant.stockQuantity,
               }
@@ -176,7 +190,6 @@ export async function createOrderFromCart(userId: string, input: CheckoutInput) 
       });
       return created;
     },
-    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
   );
 
   void sendOrderConfirmationEmail({
@@ -211,29 +224,35 @@ async function mutateStockForOrder(
   const deltaMultiplier = action === "DEDUCT" ? -1 : 1;
   for (const item of order.items) {
     if (!item.productId) throw new ValidationError("Order references an unavailable product");
+    let previousStock: number;
+    let newStock: number;
     if (item.variantId) {
-      const updated =
-        action === "DEDUCT"
-          ? await tx.productVariant.updateMany({
-              where: { id: item.variantId, productId: item.productId, stockQuantity: { gte: item.quantity } },
-              data: { stockQuantity: { decrement: item.quantity } },
-            })
-          : await tx.productVariant.updateMany({
-              where: { id: item.variantId, productId: item.productId },
-              data: { stockQuantity: { increment: item.quantity } },
-            });
+      const current = await tx.productVariant.findFirst({
+        where: { id: item.variantId, productId: item.productId },
+        select: { stockQuantity: true },
+      });
+      if (!current) throw new ValidationError("Order references an unavailable product variant");
+      previousStock = current.stockQuantity;
+      newStock = previousStock + item.quantity * deltaMultiplier;
+      if (newStock < 0) throw new ValidationError("Insufficient stock to confirm this order");
+      const updated = await tx.productVariant.updateMany({
+        where: { id: item.variantId, productId: item.productId, stockQuantity: previousStock },
+        data: { stockQuantity: newStock },
+      });
       if (updated.count !== 1) throw new ValidationError("Insufficient stock to confirm this order");
     } else {
-      const updated =
-        action === "DEDUCT"
-          ? await tx.product.updateMany({
-              where: { id: item.productId, stockQuantity: { gte: item.quantity } },
-              data: { stockQuantity: { decrement: item.quantity } },
-            })
-          : await tx.product.updateMany({
-              where: { id: item.productId },
-              data: { stockQuantity: { increment: item.quantity } },
-            });
+      const current = await tx.product.findUnique({
+        where: { id: item.productId },
+        select: { stockQuantity: true },
+      });
+      if (!current) throw new ValidationError("Order references an unavailable product");
+      previousStock = current.stockQuantity;
+      newStock = previousStock + item.quantity * deltaMultiplier;
+      if (newStock < 0) throw new ValidationError("Insufficient stock to confirm this order");
+      const updated = await tx.product.updateMany({
+        where: { id: item.productId, stockQuantity: previousStock },
+        data: { stockQuantity: newStock },
+      });
       if (updated.count !== 1) throw new ValidationError("Insufficient stock to confirm this order");
     }
     await tx.inventoryAdjustment.create({
@@ -243,6 +262,8 @@ async function mutateStockForOrder(
         orderId: order.id,
         type: action === "DEDUCT" ? "ORDER_DEDUCTION" : "ORDER_RESTORATION",
         quantityDelta: item.quantity * deltaMultiplier,
+        previousStock,
+        newStock,
         reason: action === "DEDUCT" ? "Stock deducted when order was confirmed" : "Stock restored after cancellation",
         createdById: actorId,
       },
@@ -256,7 +277,7 @@ export async function transitionOrderStatus(input: {
   actorId: string;
   note?: string | null;
 }) {
-  return db.$transaction(
+  return serializableTransaction(
     async (tx) => {
       const order = await tx.order.findUnique({
         where: { id: input.orderId },
@@ -305,62 +326,83 @@ export async function transitionOrderStatus(input: {
       });
       return updated;
     },
-    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
   );
 }
 
 export async function createManualInventoryAdjustment(input: {
   productId: string;
   variantId?: string | null;
-  quantityDelta: number;
+  mode?: "DELTA" | "SET_EXACT";
+  quantityDelta?: number;
+  targetStock?: number;
   reason: string;
   actorId: string;
 }) {
-  if (!Number.isInteger(input.quantityDelta) || input.quantityDelta === 0) {
+  const mode = input.mode ?? "DELTA";
+  if (mode === "DELTA" && (!Number.isInteger(input.quantityDelta) || input.quantityDelta === 0)) {
     throw new ValidationError("Inventory adjustment must be a non-zero integer");
+  }
+  if (mode === "SET_EXACT" && (!Number.isInteger(input.targetStock) || (input.targetStock ?? -1) < 0)) {
+    throw new ValidationError("Exact stock must be a non-negative integer");
   }
   if (input.reason.trim().length < 3) throw new ValidationError("An adjustment reason is required");
 
-  return db.$transaction(async (tx) => {
+  return serializableTransaction(async (tx) => {
+    let previousStock: number;
     if (input.variantId) {
       const variant = await tx.productVariant.findFirst({
         where: { id: input.variantId, productId: input.productId },
+        select: { id: true, stockQuantity: true },
       });
-      if (!variant) {
-        throw new ValidationError("Adjustment would create negative stock");
-      }
+      if (!variant) throw new ValidationError("Product variant was not found");
+      previousStock = variant.stockQuantity;
+      const newStock = mode === "SET_EXACT" ? input.targetStock! : previousStock + input.quantityDelta!;
+      const quantityDelta = newStock - previousStock;
+      if (newStock < 0) throw new ValidationError("Adjustment would create negative stock");
+      if (quantityDelta === 0) throw new ValidationError("Adjustment does not change stock");
       const updated = await tx.productVariant.updateMany({
-        where: {
-          id: variant.id,
-          ...(input.quantityDelta < 0 ? { stockQuantity: { gte: -input.quantityDelta } } : {}),
-        },
-        data: { stockQuantity: { increment: input.quantityDelta } },
+        where: { id: variant.id, stockQuantity: previousStock },
+        data: { stockQuantity: newStock },
       });
-      if (updated.count !== 1) throw new ValidationError("Adjustment would create negative stock");
+      if (updated.count !== 1) throw new ValidationError("Stock changed while the adjustment was being saved");
+      return tx.inventoryAdjustment.create({
+        data: {
+          productId: input.productId,
+          variantId: input.variantId,
+          type: "MANUAL_CORRECTION",
+          quantityDelta,
+          previousStock,
+          newStock,
+          reason: input.reason.trim(),
+          createdById: input.actorId,
+        },
+      });
     } else {
-      const product = await tx.product.findUnique({ where: { id: input.productId } });
-      if (!product) {
-        throw new ValidationError("Adjustment would create negative stock");
-      }
+      const product = await tx.product.findUnique({ where: { id: input.productId }, select: { id: true, stockQuantity: true } });
+      if (!product) throw new ValidationError("Product was not found");
+      previousStock = product.stockQuantity;
+      const newStock = mode === "SET_EXACT" ? input.targetStock! : previousStock + input.quantityDelta!;
+      const quantityDelta = newStock - previousStock;
+      if (newStock < 0) throw new ValidationError("Adjustment would create negative stock");
+      if (quantityDelta === 0) throw new ValidationError("Adjustment does not change stock");
       const updated = await tx.product.updateMany({
-        where: {
-          id: product.id,
-          ...(input.quantityDelta < 0 ? { stockQuantity: { gte: -input.quantityDelta } } : {}),
-        },
-        data: { stockQuantity: { increment: input.quantityDelta } },
+        where: { id: product.id, stockQuantity: previousStock },
+        data: { stockQuantity: newStock },
       });
-      if (updated.count !== 1) throw new ValidationError("Adjustment would create negative stock");
+      if (updated.count !== 1) throw new ValidationError("Stock changed while the adjustment was being saved");
+      return tx.inventoryAdjustment.create({
+        data: {
+          productId: input.productId,
+          variantId: null,
+          type: "MANUAL_CORRECTION",
+          quantityDelta,
+          previousStock,
+          newStock,
+          reason: input.reason.trim(),
+          createdById: input.actorId,
+        },
+      });
     }
-    return tx.inventoryAdjustment.create({
-      data: {
-        productId: input.productId,
-        variantId: input.variantId ?? null,
-        type: "MANUAL_CORRECTION",
-        quantityDelta: input.quantityDelta,
-        reason: input.reason.trim(),
-        createdById: input.actorId,
-      },
-    });
   });
 }
 

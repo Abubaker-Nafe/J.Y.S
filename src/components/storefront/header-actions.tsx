@@ -1,14 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { Heart, ShoppingBag, UserRound } from "lucide-react";
+import { Heart, LayoutDashboard, ShoppingBag, UserRound } from "lucide-react";
 import type { Locale } from "@/lib/i18n/config";
 import { translate } from "@/lib/i18n/dictionaries";
 import { useStore } from "./store-provider";
 
 export function HeaderActions({ locale }: { locale: Locale }) {
-  const { cartCount, wishlist } = useStore();
+  const { cartCount, wishlist, user, sessionReady } = useStore();
   const actions = [
+    ...(sessionReady && user?.role === "ADMIN"
+      ? [{ href: `/${locale}/admin`, label: locale === "ar" ? "لوحة الإدارة" : "Admin dashboard", Icon: LayoutDashboard, count: 0 }]
+      : []),
     { href: `/${locale}/wishlist`, label: translate(locale, "nav.wishlist"), Icon: Heart, count: wishlist.length },
     { href: `/${locale}/profile`, label: translate(locale, "nav.account"), Icon: UserRound, count: 0 },
     { href: `/${locale}/cart`, label: translate(locale, "nav.cart"), Icon: ShoppingBag, count: cartCount },

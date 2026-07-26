@@ -90,7 +90,7 @@ function hashResetToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export async function requestPasswordReset(email: string, requestedIp: string): Promise<void> {
+export async function requestPasswordReset(email: string, requestedIp: string, applicationOrigin: string): Promise<void> {
   const user = await db.user.findUnique({
     where: { email },
     select: { id: true, email: true, name: true, status: true },
@@ -113,12 +113,11 @@ export async function requestPasswordReset(email: string, requestedIp: string): 
     }),
   ]);
 
-  const baseUrl = process.env.APP_URL ?? "http://localhost:3000";
   try {
     await sendPasswordResetEmail({
       to: user.email,
       recipientName: user.name,
-      resetUrl: `${baseUrl.replace(/\/$/, "")}/reset-password?token=${encodeURIComponent(token)}`,
+      resetUrl: `${applicationOrigin.replace(/\/$/, "")}/reset-password?token=${encodeURIComponent(token)}`,
     });
   } catch (error) {
     // The public endpoint must remain indistinguishable for existing and unknown emails.

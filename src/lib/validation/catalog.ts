@@ -18,6 +18,7 @@ export const productInputSchema = z
     stockQuantity: z.number().int().min(0).max(1_000_000).default(0),
     lowStockThreshold: z.number().int().min(0).max(100_000).default(5),
     status: z.enum(["DRAFT", "ACTIVE", "HIDDEN", "ARCHIVED"]).default("DRAFT"),
+    isAvailable: z.boolean().default(true),
     isFeatured: z.boolean().default(false),
   })
   .strict();
@@ -30,6 +31,7 @@ export const variantInputSchema = z
     attributes: z.record(z.string(), z.string().max(200)).default({}),
     priceOverride: decimalMoneySchema.nullish(),
     stockQuantity: z.number().int().min(0).max(1_000_000).default(0),
+    isActive: z.boolean().default(true),
     isAvailable: z.boolean().default(true),
   })
   .strict();

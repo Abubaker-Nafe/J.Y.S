@@ -19,9 +19,10 @@ export async function requireAdminPage(locale: AdminLocale): Promise<AdminActor>
   try {
     return await requireAdminActor();
   } catch (error) {
-    if (error instanceof AuthenticationError || error instanceof AuthorizationError) {
+    if (error instanceof AuthenticationError) {
       redirect(`/${locale}/login?next=${encodeURIComponent(`/${locale}/admin`)}`);
     }
+    if (error instanceof AuthorizationError) redirect(`/${locale}/profile`);
     throw error;
   }
 }

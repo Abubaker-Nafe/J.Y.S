@@ -18,6 +18,9 @@ let deliveryOrderNumber = "";
 let pickupOrderId = "";
 let pickupOrderNumber = "";
 let createdProductId = "";
+let createdProductSlug = "";
+let createdProductSku = "";
+let createdProductName = "";
 
 type JsonObject = Record<string, unknown>;
 type JsonResponse = APIResponse | Response;
@@ -30,13 +33,11 @@ function stablePhone(value: string) {
 
 async function gotoHydrated(page: Page, url: string) {
   await page.goto(url, { waitUntil: "domcontentloaded" });
-  await page.waitForLoadState("networkidle");
   await expect(page.locator("main")).toBeVisible();
 }
 
 async function reloadHydrated(page: Page) {
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.waitForLoadState("networkidle");
   await expect(page.locator("main")).toBeVisible();
 }
 
@@ -239,9 +240,10 @@ test.describe("seeded PostgreSQL customer and admin journeys", () => {
     await addProductToCart(page, "complete-shaving-set", "Complete Shaving Set");
     await gotoHydrated(page, "/en/checkout");
 
-    await page.getByRole("radio", { name: /Store pickup/ }).check();
+    await page.locator("main").getByText("Store pickup", { exact: true }).click();
+    await expect(page.getByRole("radio", { name: /Store pickup/ })).toBeChecked();
     await expect(page.getByLabel("Full address")).toHaveCount(0);
-    await expect(page.getByText("Cash on collection", { exact: true })).toBeVisible();
+    await expect(page.getByText("Cash on collection", { exact: true }).first()).toBeVisible();
     await page.getByLabel("Full name").fill(`E2E Customer ${runId}`);
     await page.getByLabel("Phone number").fill(customerPhone);
     await page.getByRole("checkbox").check();
@@ -277,7 +279,7 @@ test.describe("seeded PostgreSQL customer and admin journeys", () => {
     await page.getByRole("link", { name: new RegExp(deliveryOrderNumber) }).click();
     await expect(page).toHaveURL(new RegExp(`/en/profile/orders/${deliveryOrderId}$`));
     await expect(page.getByText(deliveryOrderNumber, { exact: true })).toBeVisible();
-    await expect(page.getByText("Delivery", { exact: true })).toBeVisible();
+    await expect(page.locator("main").getByRole("heading", { name: "Delivery", exact: true })).toBeVisible();
 
     const history = await page.request.get("/api/account/orders");
     const historyPayload = await expectResponse(history, 200);
@@ -291,11 +293,32 @@ test.describe("seeded PostgreSQL customer and admin journeys", () => {
 
   test("denies the customer access to the protected admin area", async ({ page }) => {
     await loginCustomer(page);
+    await expect(page.getByRole("link", { name: "Admin dashboard" })).toHaveCount(0);
     await page.goto("/en/admin");
 
-    await expect(page).toHaveURL(/\/en\/login\?next=/);
-    await expect(page.getByRole("heading", { level: 1, name: "Sign in" })).toBeVisible();
+    await expect(page).toHaveURL(/\/en\/profile$/);
+    await expect(page.getByRole("heading", { level: 1, name: "My account" })).toBeVisible();
     await expect(page.getByText("JYS Administration", { exact: true })).toHaveCount(0);
+
+    const reports = await page.request.get("/api/admin/reports");
+    expect(reports.status()).toBe(403);
+    const exports = await page.request.get("/api/admin/reports/csv?type=orders");
+    expect(exports.status()).toBe(403);
+  });
+
+  test("shows administrators a storefront entry point to the admin dashboard", async ({ page }) => {
+    await loginAdmin(page);
+    await gotoHydrated(page, "/en");
+
+    const adminEntry = page.getByRole("link", { name: "Admin dashboard" });
+    await expect(adminEntry).toBeVisible();
+    await expect(adminEntry).toHaveAttribute("href", "/en/admin");
+    await adminEntry.click();
+
+    await expect(page).toHaveURL(/\/en\/admin$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Dashboard" })).toBeVisible();
+    await expect(page.getByText("JYS Admin", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Close navigation" })).toBeHidden();
   });
 
   test("allows a seeded administrator to create a bilingual product", async ({ page }) => {
@@ -303,6 +326,9 @@ test.describe("seeded PostgreSQL customer and admin journeys", () => {
     const productName = `E2E Inventory Product ${runId}`;
     const sku = `E2E-${runId.slice(-12).toUpperCase()}`;
     const slug = `e2e-inventory-${runId}`;
+    createdProductName = productName;
+    createdProductSku = sku;
+    createdProductSlug = slug;
 
     await page.getByLabel("English name").fill(productName);
     await page.getByLabel("الاسم بالعربية").fill(`منتج اختبار ${runId}`);
@@ -318,7 +344,7 @@ test.describe("seeded PostgreSQL customer and admin journeys", () => {
     const responsePromise = page.waitForResponse(
       (response) => response.url().endsWith("/api/admin/products") && response.request().method() === "POST",
     );
-    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.getByRole("button", { name: "Save changes", exact: true }).click();
     const payload = await expectResponse(await responsePromise, 201);
     createdProductId = (payload.data as { id?: string } | undefined)?.id ?? "";
     expect(createdProductId).not.toBe("");
@@ -326,6 +352,40 @@ test.describe("seeded PostgreSQL customer and admin journeys", () => {
     await page.waitForURL((url) => url.pathname === `/en/admin/products/${createdProductId}`);
     await expect(page.getByRole("heading", { level: 1, name: productName })).toBeVisible();
     await expect(page.getByText(sku, { exact: false })).toBeVisible();
+  });
+
+  test("edits the created product and reflects availability on the storefront", async ({ page }) => {
+    await loginAdmin(page, `/en/admin/products/${createdProductId}`);
+    const editedName = `${createdProductName} Edited`;
+    await page.getByLabel("English name").fill(editedName);
+    const responsePromise = page.waitForResponse(
+      (response) => response.url().endsWith(`/api/admin/products/${createdProductId}`) && response.request().method() === "PATCH",
+    );
+    await page.getByRole("button", { name: "Save changes", exact: true }).click();
+    await expectResponse(await responsePromise, 200);
+    await expect(page.getByRole("heading", { level: 1, name: editedName })).toBeVisible();
+
+    await gotoHydrated(page, `/en/product/${createdProductSlug}`);
+    await expect(page.getByRole("heading", { level: 1, name: editedName })).toBeVisible();
+
+    await gotoHydrated(page, `/en/admin/products/${createdProductId}`);
+    await page.getByLabel("Available for sale").uncheck();
+    const hideResponse = page.waitForResponse(
+      (response) => response.url().endsWith(`/api/admin/products/${createdProductId}`) && response.request().method() === "PATCH",
+    );
+    await page.getByRole("button", { name: "Save changes", exact: true }).click();
+    await expectResponse(await hideResponse, 200);
+    await gotoHydrated(page, `/en/product/${createdProductSlug}`);
+    await expect(page.getByRole("heading", { level: 1, name: "That page is not on the shelf" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: editedName })).toHaveCount(0);
+
+    await gotoHydrated(page, `/en/admin/products/${createdProductId}`);
+    await page.getByLabel("Available for sale").check();
+    const restoreResponse = page.waitForResponse(
+      (response) => response.url().endsWith(`/api/admin/products/${createdProductId}`) && response.request().method() === "PATCH",
+    );
+    await page.getByRole("button", { name: "Save changes", exact: true }).click();
+    await expectResponse(await restoreResponse, 200);
   });
 
   test("confirms the delivery order and then cancels it to restore inventory", async ({ page }) => {
@@ -400,10 +460,17 @@ test.describe("seeded PostgreSQL customer and admin journeys", () => {
     const sku = `E2E-${runId.slice(-12).toUpperCase()}`;
     await loginAdmin(page, `/en/admin/inventory?search=${encodeURIComponent(sku)}`);
 
-    let row = page.getByRole("row").filter({ hasText: sku });
+    const inventoryRow = () => page.getByRole("row").filter({
+      hasText: sku,
+      has: page.getByRole("button", { name: "Adjust stock" }),
+    });
+    let row = inventoryRow();
     await expect(row).toBeVisible();
     await expect(row.getByRole("cell").nth(3)).toHaveText("11");
     await row.getByRole("button", { name: "Adjust stock" }).click();
+    const adjustmentPanel = page.getByRole("region", { name: "Manual inventory adjustment" });
+    await expect(adjustmentPanel).toBeVisible();
+    await expect(adjustmentPanel).toBeFocused();
     await page.getByLabel("Quantity change").fill("3");
     await page.getByLabel("Reason").fill(`E2E ${runId} stock verification`);
 
@@ -411,18 +478,279 @@ test.describe("seeded PostgreSQL customer and admin journeys", () => {
       (response) => response.url().endsWith("/api/admin/inventory") && response.request().method() === "POST",
     );
     await page.getByRole("button", { name: "Save adjustment" }).click();
-    await expectResponse(await responsePromise, 200);
-    row = page.getByRole("row").filter({ hasText: sku });
+    await expectResponse(await responsePromise, 201);
+    row = inventoryRow();
     await expect(row.getByRole("cell").nth(3)).toHaveText("14");
 
     await row.getByRole("button", { name: "Adjust stock" }).click();
-    await page.getByLabel("Quantity change").fill("-3");
-    await page.getByLabel("Reason").fill(`E2E ${runId} cleanup reversal`);
+    await page.getByLabel("Adjustment method").selectOption("SET_EXACT");
+    await page.getByLabel("Exact new stock").fill("11");
+    await page.getByLabel("Reason").fill(`E2E ${runId} exact stock reset`);
     responsePromise = page.waitForResponse(
       (response) => response.url().endsWith("/api/admin/inventory") && response.request().method() === "POST",
     );
     await page.getByRole("button", { name: "Save adjustment" }).click();
+    await expectResponse(await responsePromise, 201);
+    await expect(inventoryRow().getByRole("cell").nth(3)).toHaveText("11");
+
+    const adjustments = await prisma.inventoryAdjustment.findMany({
+      where: { productId: createdProductId, type: "MANUAL_CORRECTION" },
+      orderBy: { createdAt: "asc" },
+      select: { previousStock: true, quantityDelta: true, newStock: true, reason: true },
+    });
+    expect(adjustments.slice(-2)).toEqual([
+      { previousStock: 11, quantityDelta: 3, newStock: 14, reason: `E2E ${runId} stock verification` },
+      { previousStock: 14, quantityDelta: -3, newStock: 11, reason: `E2E ${runId} exact stock reset` },
+    ]);
+    await expect(page.getByRole("heading", { name: "Inventory adjustment history" }).locator("xpath=ancestor::section")).toContainText(createdProductSku);
+  });
+
+  test("allows only one concurrent confirmation to consume the final unit and keeps retries idempotent", async ({ page }) => {
+    await loginAdmin(page);
+    const category = await prisma.category.findFirst({ where: { isActive: true }, select: { id: true } });
+    const customer = await prisma.user.findUnique({ where: { email: customerEmail }, select: { id: true, name: true, email: true, phone: true } });
+    if (!category || !customer) throw new Error("Concurrency test prerequisites are missing");
+    const suffix = `${runId.slice(-10)}-${Date.now()}`;
+    const product = await prisma.product.create({
+      data: {
+        categoryId: category.id,
+        slug: `e2e-final-unit-${suffix}`,
+        sku: `FINAL-${suffix}`.slice(0, 64),
+        nameAr: "منتج آخر وحدة",
+        nameEn: "Final unit concurrency product",
+        descriptionAr: "منتج لاختبار التزامن.",
+        descriptionEn: "Product used for the final-unit concurrency test.",
+        price: "10.00",
+        stockQuantity: 1,
+        status: "ACTIVE",
+        isAvailable: true,
+      },
+    });
+    const orderIds: string[] = [];
+    let staleCartId = "";
+    try {
+      for (const index of [1, 2]) {
+        const order = await prisma.order.create({
+          data: {
+            orderNumber: `JYS-CONCURRENT-${suffix}-${index}`.slice(0, 64),
+            userId: customer.id,
+            fulfillmentMethod: "PICKUP",
+            paymentMethod: "CASH_ON_PICKUP",
+            currency: "ILS",
+            subtotal: "10.00",
+            total: "10.00",
+            customerName: customer.name,
+            customerEmail: customer.email,
+            customerPhone: customer.phone ?? "0590000000",
+            policyAcceptedAt: new Date(),
+            items: {
+              create: {
+                productId: product.id,
+                skuSnapshot: product.sku,
+                productNameAr: product.nameAr,
+                productNameEn: product.nameEn,
+                unitPrice: "10.00",
+                quantity: 1,
+                lineTotal: "10.00",
+              },
+            },
+            statusHistory: { create: { toStatus: "NEW" } },
+          },
+          select: { id: true },
+        });
+        orderIds.push(order.id);
+      }
+
+      const confirmations = await Promise.all(orderIds.map((id) => page.request.patch(`/api/admin/orders/${id}`, {
+        data: { status: "CONFIRMED", note: `Concurrent final-unit probe ${suffix}` },
+      })));
+      expect(confirmations.filter((response) => response.status() === 200)).toHaveLength(1);
+      const rejected = confirmations.find((response) => response.status() !== 200);
+      expect(rejected).toBeDefined();
+      expect([400, 409, 422]).toContain(rejected?.status());
+      expect(JSON.stringify(await responseJson(rejected!))).toMatch(/stock|inventory|changed/i);
+      expect((await prisma.product.findUnique({ where: { id: product.id }, select: { stockQuantity: true } }))?.stockQuantity).toBe(0);
+      expect(await prisma.inventoryAdjustment.count({ where: { productId: product.id, type: "ORDER_DEDUCTION" } })).toBe(1);
+
+      const orders = await prisma.order.findMany({ where: { id: { in: orderIds } }, select: { id: true, status: true } });
+      const winner = orders.find((order) => order.status === "CONFIRMED");
+      const loser = orders.find((order) => order.status === "NEW");
+      if (!winner || !loser) throw new Error("Concurrent confirmation did not leave one winner and one rejected order");
+
+      await prisma.cart.updateMany({ where: { userId: customer.id, status: "ACTIVE" }, data: { status: "ABANDONED" } });
+      const staleCart = await prisma.cart.create({
+        data: {
+          userId: customer.id,
+          items: {
+            create: {
+              productId: product.id,
+              targetKey: `product:${product.id}`,
+              quantity: 1,
+              priceSnapshot: product.price,
+            },
+          },
+        },
+        select: { id: true },
+      });
+      staleCartId = staleCart.id;
+      await page.request.post("/api/auth/logout");
+      await loginCustomer(page, "/en/cart");
+      const staleLine = page.locator("article").filter({ hasText: product.nameEn });
+      await expect(staleLine).toContainText("Currently unavailable");
+      await expect(page.locator('[aria-disabled="true"]').filter({ hasText: "Checkout" })).toBeVisible();
+      const orderCountBefore = await prisma.order.count({ where: { userId: customer.id } });
+      const staleCheckout = await page.request.post("/api/checkout", {
+        data: {
+          fulfillmentMethod: "PICKUP",
+          name: customer.name,
+          phone: customer.phone ?? "0590000000",
+          acceptPolicies: true,
+        },
+      });
+      await expectResponse(staleCheckout, 400);
+      expect(await prisma.order.count({ where: { userId: customer.id } })).toBe(orderCountBefore);
+
+      await page.request.post("/api/auth/logout");
+      await loginAdmin(page);
+      await expectResponse(await page.request.patch(`/api/admin/orders/${winner.id}`, { data: { status: "CONFIRMED" } }), 200);
+      expect(await prisma.inventoryAdjustment.count({ where: { productId: product.id, type: "ORDER_DEDUCTION" } })).toBe(1);
+      await expectResponse(await page.request.patch(`/api/admin/orders/${winner.id}`, { data: { status: "CANCELLED" } }), 200);
+      await expectResponse(await page.request.patch(`/api/admin/orders/${winner.id}`, { data: { status: "CANCELLED" } }), 200);
+      await expectResponse(await page.request.patch(`/api/admin/orders/${loser.id}`, { data: { status: "CANCELLED" } }), 200);
+      expect((await prisma.product.findUnique({ where: { id: product.id }, select: { stockQuantity: true } }))?.stockQuantity).toBe(1);
+      expect(await prisma.inventoryAdjustment.count({ where: { productId: product.id, type: "ORDER_RESTORATION" } })).toBe(1);
+    } finally {
+      if (staleCartId) await prisma.cart.deleteMany({ where: { id: staleCartId } });
+      await prisma.inventoryAdjustment.deleteMany({ where: { productId: product.id } });
+      await prisma.order.deleteMany({ where: { id: { in: orderIds } } });
+      await prisma.product.delete({ where: { id: product.id } });
+    }
+  });
+
+  test("updates settings and policy content and exposes the saved public values", async ({ page }) => {
+    await loginAdmin(page, "/en/admin/settings");
+    const storeName = page.getByLabel("English store name");
+    const originalStoreName = await storeName.inputValue();
+    const updatedStoreName = `${originalStoreName} E2E`;
+    await storeName.fill(updatedStoreName);
+    let responsePromise = page.waitForResponse(
+      (response) => response.url().endsWith("/api/admin/settings") && response.request().method() === "PATCH",
+    );
+    await page.getByRole("button", { name: "Save settings" }).click();
     await expectResponse(await responsePromise, 200);
-    await expect(page.getByRole("row").filter({ hasText: sku }).getByRole("cell").nth(3)).toHaveText("11");
+    expect((await prisma.siteSetting.findUnique({ where: { key: "store.profile" } }))?.value).toMatchObject({ nameEn: updatedStoreName });
+
+    await gotoHydrated(page, "/en/admin/content");
+    await page.getByRole("tab", { name: "No-return policy" }).click();
+    const content = page.getByLabel("English content");
+    const originalContent = await content.inputValue();
+    const marker = ` E2E policy ${runId}.`;
+    await content.fill(`${originalContent}${marker}`);
+    responsePromise = page.waitForResponse(
+      (response) => response.url().endsWith("/api/admin/content") && response.request().method() === "PATCH",
+    );
+    await page.getByRole("button", { name: "Save content" }).click();
+    await expectResponse(await responsePromise, 200);
+    await gotoHydrated(page, "/en/no-returns");
+    await expect(page.getByText(new RegExp(`E2E policy ${runId}`))).toBeVisible();
+    await addProductToCart(page, createdProductSlug, `${createdProductName} Edited`);
+    await gotoHydrated(page, "/en/checkout");
+    await expect(page.getByText(new RegExp(`E2E policy ${runId}`))).toBeVisible();
+
+    await gotoHydrated(page, "/en/admin/content");
+    await page.getByRole("tab", { name: "No-return policy" }).click();
+    await page.getByLabel("English content").fill(originalContent);
+    responsePromise = page.waitForResponse(
+      (response) => response.url().endsWith("/api/admin/content") && response.request().method() === "PATCH",
+    );
+    await page.getByRole("button", { name: "Save content" }).click();
+    await expectResponse(await responsePromise, 200);
+
+    await gotoHydrated(page, "/en/admin/settings");
+    await page.getByLabel("English store name").fill(originalStoreName);
+    responsePromise = page.waitForResponse(
+      (response) => response.url().endsWith("/api/admin/settings") && response.request().method() === "PATCH",
+    );
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expectResponse(await responsePromise, 200);
+  });
+
+  test("filters reports and downloads all five authorized CSV exports", async ({ page }) => {
+    await loginAdmin(page, "/en/admin/reports");
+    await expect(page.getByRole("heading", { level: 1, name: "Reports & analytics" })).toBeVisible();
+    await page.getByLabel("Payment status").selectOption("PENDING");
+    await page.getByLabel("Order status").selectOption("ALL");
+    await page.getByRole("button", { name: "Apply" }).click();
+    await expect(page).toHaveURL(/paymentStatus=PENDING/);
+
+    for (const type of ["orders", "sales", "products", "inventory", "customers"]) {
+      const response = await page.request.get(`/api/admin/reports/csv?type=${type}&status=ALL&paymentStatus=PENDING&locale=ar`);
+      expect(response.status()).toBe(200);
+      expect(response.headers()["content-disposition"]).toContain(`jys-${type}-report-`);
+      expect((await response.body()).subarray(0, 3)).toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
+    }
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Orders" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(/^jys-orders-report-\d{4}-\d{2}-\d{2}-\d{4}-\d{2}-\d{2}\.csv$/);
+    await expect(page.getByRole("button", { name: "Export Orders" })).toBeEnabled();
+  });
+
+  test("archives the created product without deleting its ledger", async ({ page }) => {
+    await loginAdmin(page, `/en/admin/products?search=${encodeURIComponent(createdProductSku)}`);
+    const ledgerCount = await prisma.inventoryAdjustment.count({ where: { productId: createdProductId } });
+    const response = await page.request.delete(`/api/admin/products/${createdProductId}`);
+    await expectResponse(response, 200);
+    expect((await prisma.product.findUnique({ where: { id: createdProductId }, select: { archivedAt: true } }))?.archivedAt).not.toBeNull();
+    expect(await prisma.inventoryAdjustment.count({ where: { productId: createdProductId } })).toBe(ledgerCount);
+    await gotoHydrated(page, `/en/product/${createdProductSlug}`);
+    await expect(page.getByRole("heading", { level: 1, name: "That page is not on the shelf" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: createdProductName })).toHaveCount(0);
+  });
+});
+
+test.describe("seeded PostgreSQL mobile admin reachability", () => {
+  test.skip(!databaseReady, "Set E2E_DATABASE_READY=true only after migrating and seeding a disposable PostgreSQL test database.");
+
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(testInfo.project.name !== "mobile", "The responsive admin navigation check runs only in the mobile project.");
+  });
+
+  test("opens every operational module and exposes its primary controls", async ({ page }) => {
+    test.setTimeout(90_000);
+    await loginAdmin(page);
+
+    async function openModule(linkName: string, pathname: string, heading: string) {
+      await page.getByRole("button", { name: "Open navigation" }).click();
+      const drawer = page.getByRole("dialog", { name: "Admin navigation" });
+      await expect(drawer).toBeVisible();
+      await expect(drawer.getByRole("button", { name: "Close navigation" })).toBeVisible();
+      await drawer.getByRole("link", { name: linkName, exact: true }).click();
+      await page.waitForURL((url) => url.pathname === pathname);
+      await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
+    }
+
+    await openModule("Products", "/en/admin/products", "Products");
+    await expect(page.getByRole("link", { name: "Add product", exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "Add product", exact: true }).click();
+    await page.waitForURL((url) => url.pathname === "/en/admin/products/new");
+    await expect(page.getByRole("heading", { level: 1, name: "Create product" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save changes", exact: true })).toBeVisible();
+
+    await openModule("Inventory", "/en/admin/inventory", "Inventory");
+    await expect(page.getByRole("button", { name: "Adjust stock" }).first()).toBeVisible();
+
+    await openModule("Orders", "/en/admin/orders", "Orders");
+    await expect(page.getByRole("search")).toBeVisible();
+
+    await openModule("Customers", "/en/admin/customers", "Customers");
+    await openModule("Cities & fees", "/en/admin/locations", "Cities, areas & delivery fees");
+    await openModule("Content", "/en/admin/content", "Content management");
+
+    await openModule("Settings", "/en/admin/settings", "Website settings");
+    await expect(page.getByRole("button", { name: "Save settings" })).toBeVisible();
+
+    await openModule("Reports", "/en/admin/reports", "Reports");
+    await expect(page.getByRole("button", { name: "Export Orders" })).toBeVisible();
   });
 });

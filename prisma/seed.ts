@@ -3,8 +3,6 @@ import { hash } from "bcryptjs";
 import {
   DEFAULT_SEED_CREDENTIALS,
   assertSafeSeedCredentials,
-  existingSeedProductUpdate,
-  existingSeedVariantUpdate,
 } from "./seed-policy";
 
 const prisma = new PrismaClient();
@@ -25,7 +23,7 @@ async function seedLocations() {
     await prisma.city.upsert({
       where: { id },
       create: { id, slug, nameAr, nameEn, deliveryFee, displayOrder: cities.findIndex((c) => c[0] === id) },
-      update: { slug, nameAr, nameEn, deliveryFee, isActive: true },
+      update: {},
     });
   }
 
@@ -43,7 +41,7 @@ async function seedLocations() {
     await prisma.area.upsert({
       where: { id },
       create: { id, cityId, slug, nameAr, nameEn, deliveryFee, displayOrder: areas.findIndex((a) => a[0] === id) },
-      update: { cityId, slug, nameAr, nameEn, deliveryFee, isActive: true },
+      update: {},
     });
   }
 }
@@ -95,7 +93,7 @@ async function seedUsers() {
   await prisma.customerProfile.upsert({
     where: { userId: CUSTOMER_ID },
     create: { id: "seed_profile_customer", userId: CUSTOMER_ID, preferredLocale: "ar" },
-    update: { preferredLocale: "ar" },
+    update: {},
   });
   await prisma.address.upsert({
     where: { id: "seed_address_customer" },
@@ -110,10 +108,10 @@ async function seedUsers() {
       addressLine: "شارع الإرسال، بناية 12",
       locationDetails: "الطابق الثاني بجانب الصيدلية",
     },
-    update: { isActive: true },
+    update: {},
   });
-  await prisma.customerProfile.update({
-    where: { userId: CUSTOMER_ID },
+  await prisma.customerProfile.updateMany({
+    where: { userId: CUSTOMER_ID, defaultAddressId: null },
     data: { defaultAddressId: "seed_address_customer" },
   });
 
@@ -140,7 +138,7 @@ async function seedCatalog() {
         descriptionEn: `Selected ${nameEn.toLowerCase()} for professional and home use.`,
         displayOrder: categories.findIndex((category) => category[0] === id),
       },
-      update: { slug, nameAr, nameEn, isActive: true, archivedAt: null },
+      update: {},
     });
   }
 
@@ -295,9 +293,8 @@ async function seedCatalog() {
         status: "ACTIVE",
         isFeatured: product.isFeatured,
       },
-      // Stock and lifecycle state are operational data. A repeat seed may
-      // refresh sample metadata, but must not undo orders or admin actions.
-      update: existingSeedProductUpdate(product),
+      // Products become business-managed data after first creation.
+      update: {},
     });
     await prisma.productImage.upsert({
       where: { storageKey: `seed-${product.id}.png` },
@@ -312,7 +309,7 @@ async function seedCatalog() {
         sizeBytes: 1,
         isPrimary: true,
       },
-      update: { url: product.image, altAr: product.nameAr, altEn: product.nameEn, isPrimary: true },
+      update: {},
     });
     for (const variant of product.variants) {
       const [id, sku, labelAr, labelEn, priceOverride, stockQuantity, attributes] = variant;
@@ -328,7 +325,7 @@ async function seedCatalog() {
           stockQuantity,
           attributes,
         },
-        update: existingSeedVariantUpdate({ sku, labelAr, labelEn, priceOverride, attributes }),
+        update: {},
       });
     }
   }
@@ -353,7 +350,7 @@ async function seedSettingsAndContent() {
     await prisma.siteSetting.upsert({
       where: { key },
       create: { key, value, description, isPublic, updatedById: ADMIN_ID },
-      update: { value, description, isPublic, updatedById: ADMIN_ID },
+      update: {},
     });
   }
 
@@ -372,7 +369,7 @@ async function seedSettingsAndContent() {
     await prisma.contentPage.upsert({
       where: { type },
       create: { type, slug, titleAr, titleEn, bodyAr, bodyEn, publishedAt: new Date("2026-07-01T09:00:00.000Z") },
-      update: { slug, titleAr, titleEn, bodyAr, bodyEn, isPublished: true },
+      update: {},
     });
   }
 }
@@ -522,16 +519,16 @@ async function seedOrders() {
 
 async function seedAnalyticsAndInventoryLedger() {
   const adjustments = [
-    ["seed_adjust_styling_initial", "product_styling_clay", null, null, "INITIAL_STOCK", 38, "Initial sample stock"],
-    ["seed_adjust_styling_order", "product_styling_clay", null, "seed_order_delivered", "ORDER_DEDUCTION", -2, "Seed delivered order"],
-    ["seed_adjust_shaving_initial", "product_shaving_set", null, null, "INITIAL_STOCK", 13, "Initial sample stock"],
-    ["seed_adjust_shaving_order", "product_shaving_set", null, "seed_order_pickup", "ORDER_DEDUCTION", -1, "Seed pickup order"],
-    ["seed_adjust_clipper_black", "product_precision_clipper", "variant_clipper_black", null, "INITIAL_STOCK", 14, "Initial sample stock"],
-    ["seed_adjust_clipper_silver", "product_precision_clipper", "variant_clipper_silver", null, "INITIAL_STOCK", 7, "Initial sample stock"],
-    ["seed_adjust_beard_classic", "product_beard_oil", "variant_beard_classic", null, "INITIAL_STOCK", 18, "Initial sample stock"],
-    ["seed_adjust_beard_citrus", "product_beard_oil", "variant_beard_citrus", null, "INITIAL_STOCK", 3, "Initial sample stock"],
+    ["seed_adjust_styling_initial", "product_styling_clay", null, null, "INITIAL_STOCK", 38, 0, 38, "Initial sample stock"],
+    ["seed_adjust_styling_order", "product_styling_clay", null, "seed_order_delivered", "ORDER_DEDUCTION", -2, 38, 36, "Seed delivered order"],
+    ["seed_adjust_shaving_initial", "product_shaving_set", null, null, "INITIAL_STOCK", 13, 0, 13, "Initial sample stock"],
+    ["seed_adjust_shaving_order", "product_shaving_set", null, "seed_order_pickup", "ORDER_DEDUCTION", -1, 13, 12, "Seed pickup order"],
+    ["seed_adjust_clipper_black", "product_precision_clipper", "variant_clipper_black", null, "INITIAL_STOCK", 14, 0, 14, "Initial sample stock"],
+    ["seed_adjust_clipper_silver", "product_precision_clipper", "variant_clipper_silver", null, "INITIAL_STOCK", 7, 0, 7, "Initial sample stock"],
+    ["seed_adjust_beard_classic", "product_beard_oil", "variant_beard_classic", null, "INITIAL_STOCK", 18, 0, 18, "Initial sample stock"],
+    ["seed_adjust_beard_citrus", "product_beard_oil", "variant_beard_citrus", null, "INITIAL_STOCK", 3, 0, 3, "Initial sample stock"],
   ] as const;
-  for (const [id, productId, variantId, orderId, type, quantityDelta, reason] of adjustments) {
+  for (const [id, productId, variantId, orderId, type, quantityDelta, previousStock, newStock, reason] of adjustments) {
     await prisma.inventoryAdjustment.upsert({
       where: { id },
       create: {
@@ -541,6 +538,8 @@ async function seedAnalyticsAndInventoryLedger() {
         orderId,
         type,
         quantityDelta,
+        previousStock,
+        newStock,
         reason,
         createdById: ADMIN_ID,
       },

@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useState, useSyncExternalStore, type FormEvent } from "react";
 import { ArrowUpRight, Eye, EyeOff, LockKeyhole, Mail, UserRound } from "lucide-react";
 import type { Locale } from "@/lib/i18n/config";
 import type { StorefrontLocations } from "@/lib/catalog/locations";
 import { translate } from "@/lib/i18n/dictionaries";
+import { postAuthDestination } from "@/lib/auth/navigation";
 import { Button } from "@/components/ui/button";
 import { FieldError, Input, Label, Select, Textarea } from "@/components/ui/field";
 import { useStore, type StoreUser } from "./store-provider";
@@ -16,6 +17,9 @@ type Errors = Record<string, string>;
 type Feedback = { tone: "success" | "error"; text: string } | null;
 const validEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 const validPhone = (phone: string) => /^(?:\+?970|00970|0)?5[69]\d{7}$/.test(phone.replace(/[\s-]/g, ""));
+const subscribeToHydration = () => () => {};
+const getClientHydrationSnapshot = () => true;
+const getServerHydrationSnapshot = () => false;
 
 function passwordError(password: string, mode: AuthMode, locale: Locale): string | undefined {
   if (mode === "login") {
@@ -67,6 +71,7 @@ function authErrorText(code: string | undefined, message: string | undefined, lo
 
 export function AuthForm({ locale, mode, token, nextPath, locations }: { locale: Locale; mode: AuthMode; token?: string; nextPath?: string; locations?: StorefrontLocations }) {
   const router = useRouter(); const { setSessionUser, refreshSession } = useStore();
+  const hydrated = useSyncExternalStore(subscribeToHydration, getClientHydrationSnapshot, getServerHydrationSnapshot);
   const [pending, setPending] = useState(false); const [errors, setErrors] = useState<Errors>({}); const [feedback, setFeedback] = useState<Feedback>(null); const [showPassword, setShowPassword] = useState(false);
   const [cityId, setCityId] = useState(locations?.cities[0]?.id ?? ""); const [areaId, setAreaId] = useState("");
   const city = locations?.cities.find((item) => item.id === cityId); const registrationUnavailable = mode === "register" && (!locations || locations.source === "unavailable" || locations.cities.length === 0);
@@ -100,7 +105,7 @@ export function AuthForm({ locale, mode, token, nextPath, locations }: { locale:
         if (mode === "forgot") { setFeedback({ tone: "success", text: t("auth.sent") }); event.currentTarget.reset(); return; }
         if (mode === "reset") { router.push(`/${locale}/login?reset=1`); return; }
         const payload = await response.json() as { user?: StoreUser }; if (!payload.user) throw new Error(locale === "ar" ? "استجابة الحساب غير مكتملة." : "The account response was incomplete.");
-        setSessionUser(payload.user); await refreshSession(); const safeNext = nextPath?.startsWith(`/${locale}/`) ? nextPath : `/${locale}/profile`; router.push(safeNext); router.refresh(); return;
+        setSessionUser(payload.user); await refreshSession(); router.push(postAuthDestination(locale, payload.user.role, nextPath)); router.refresh(); return;
       }
       const payload = await response.json().catch(() => ({})) as { error?: string; message?: string; fieldErrors?: Errors; issues?: Array<{ path: string; message: string }> };
       const issueErrors = (payload.issues ?? []).reduce<Errors>((result, issue) => {
@@ -127,7 +132,7 @@ export function AuthForm({ locale, mode, token, nextPath, locations }: { locale:
         {mode === "register" ? <><div><Label htmlFor="cityId">{t("auth.city")}</Label><Select id="cityId" name="cityId" value={cityId} onChange={(event) => { setCityId(event.target.value); setAreaId(""); }} disabled={registrationUnavailable} aria-invalid={Boolean(errors.cityId)} aria-describedby={errors.cityId ? "cityId-error" : undefined}><option value="">—</option>{locations?.cities.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select><FieldError id="cityId-error">{errors.cityId}</FieldError></div><div><Label htmlFor="register-area">{t("checkout.area")}</Label><Select id="register-area" name="areaId" value={areaId} onChange={(event) => setAreaId(event.target.value)} disabled={!city}><option value="">—</option>{city?.areas.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></div><div><Label htmlFor="addressLine">{t("auth.address")}</Label><Textarea id="addressLine" name="addressLine" autoComplete="street-address" aria-invalid={Boolean(errors.addressLine)} aria-describedby={errors.addressLine ? "addressLine-error" : undefined} /><FieldError id="addressLine-error">{errors.addressLine}</FieldError></div></> : null}
         {["login", "register", "reset"].includes(mode) ? passwordField() : null}{mode === "register" || mode === "reset" ? passwordField("confirmPassword", t("auth.confirmPassword")) : null}
         {mode === "login" ? <div className="text-end"><Link href={`/${locale}/forgot-password`} className="text-sm font-bold text-accent hover:underline">{t("auth.forgot")}</Link></div> : null}
-        <Button type="submit" size="lg" disabled={pending || registrationUnavailable} className="w-full">{pending ? t("common.loading") : t("auth.submit")}<ArrowUpRight className="size-4 rtl:-scale-x-100" /></Button>
+        <Button type="submit" size="lg" disabled={!hydrated || pending || registrationUnavailable} className="w-full">{pending ? t("common.loading") : t("auth.submit")}<ArrowUpRight className="size-4 rtl:-scale-x-100" /></Button>
       </form>
       {mode === "login" ? <p className="mt-7 text-center text-sm text-muted">{t("auth.noAccount")} <Link href={`/${locale}/register${nextPath ? `?next=${encodeURIComponent(nextPath)}` : ""}`} className="font-black text-ink underline decoration-accent/40 underline-offset-4">{t("auth.register")}</Link></p> : mode === "register" ? <p className="mt-7 text-center text-sm text-muted">{t("auth.hasAccount")} <Link href={`/${locale}/login${nextPath ? `?next=${encodeURIComponent(nextPath)}` : ""}`} className="font-black text-ink underline decoration-accent/40 underline-offset-4">{t("auth.login")}</Link></p> : null}
     </section>

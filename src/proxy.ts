@@ -2,12 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 
 const locales = ["ar", "en"] as const;
 const publicFile = /\.[^/]+$/;
+const excludedPrefixes = ["/api", "/_next", "/static", "/images", "/uploads"] as const;
+
+export function isProxyExcludedPath(pathname: string) {
+  return pathname === "/favicon.ico"
+    || publicFile.test(pathname)
+    || excludedPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  if (pathname.startsWith("/_next") || pathname.startsWith("/api") || publicFile.test(pathname)) {
-    return NextResponse.next();
-  }
+  if (isProxyExcludedPath(pathname)) return NextResponse.next();
 
   const pathLocale = locales.find((locale) => pathname === `/${locale}` || pathname.startsWith(`/${locale}/`));
   if (!pathLocale) {
@@ -35,5 +40,5 @@ export function proxy(request: NextRequest) {
 export const config = {
   // Keep framework traffic out of the locale proxy entirely. In particular,
   // proxying the development WebSocket prevents the client bundle hydrating.
-  matcher: ["/((?!api|_next|favicon.ico|.*\\..*).*)"],
+  matcher: ["/((?!api|_next|favicon.ico|static|images|uploads|.*\\..*).*)"],
 };

@@ -1,4 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
+import { loadEnvConfig } from "@next/env";
+
+loadEnvConfig(process.cwd());
 
 export default defineConfig({
   testDir: "./e2e",
@@ -10,8 +13,8 @@ export default defineConfig({
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
-  webServer: {
-    command: "npm.cmd run dev",
+  webServer: process.env.PLAYWRIGHT_EXTERNAL_SERVER === "true" ? undefined : {
+    command: "node node_modules/next/dist/bin/next dev",
     url: "http://127.0.0.1:3000/en",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

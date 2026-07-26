@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { LoaderCircle, Save, UserRound } from "lucide-react";
+import { LoaderCircle, RefreshCw, Save, UserRound } from "lucide-react";
 import type { Locale } from "@/lib/i18n/config";
 import { translate } from "@/lib/i18n/dictionaries";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/field";
+import { fetchWithTimeout } from "@/lib/http/client";
 
 interface Profile { id: string; name: string; email: string; phone: string | null; createdAt?: string; customerProfile?: { preferredLocale?: string } | null }
 type Feedback = { tone: "success" | "error"; text: string } | null;
@@ -13,18 +14,24 @@ type Feedback = { tone: "success" | "error"; text: string } | null;
 export function ProfileForm({ locale }: { locale: Locale }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>(null);
   useEffect(() => {
     const controller = new AbortController();
-    void fetch("/api/account/profile", { signal: controller.signal, cache: "no-store" })
-      .then(async (response) => { if (!response.ok) throw new Error(); const payload = await response.json() as { profile: Profile }; setProfile(payload.profile); })
-      .catch((error: unknown) => {
-        if (!(error instanceof DOMException && error.name === "AbortError")) setFeedback({ tone: "error", text: locale === "ar" ? "تعذر تحميل الملف الشخصي." : "Profile could not be loaded." });
+    void fetchWithTimeout("/api/account/profile", { signal: controller.signal, cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) throw new Error();
+        const payload = await response.json() as { profile?: Profile };
+        if (!payload.profile) throw new Error();
+        setProfile(payload.profile);
       })
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (!controller.signal.aborted) setFeedback({ tone: "error", text: locale === "ar" ? "تعذر تحميل الملف الشخصي. تحقق من الاتصال وحاول مجدداً." : "Profile could not be loaded. Check the connection and try again." });
+      })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [locale]);
+  }, [loadAttempt, locale]);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setPending(true); setFeedback(null); const form = new FormData(event.currentTarget);
     try {
@@ -37,7 +44,7 @@ export function ProfileForm({ locale }: { locale: Locale }) {
     finally { setPending(false); }
   }
   if (loading) return <div className="grid min-h-64 place-items-center" role="status" aria-live="polite"><LoaderCircle className="size-7 animate-spin text-accent" aria-hidden="true" /><span className="sr-only">{translate(locale, "common.loading")}</span></div>;
-  if (!profile) return <p role="alert" className="rounded-2xl bg-red-50 p-5 font-semibold text-red-800">{feedback?.text ?? (locale === "ar" ? "تعذر تحميل الملف الشخصي." : "Profile could not be loaded.")}</p>;
+  if (!profile) return <div role="alert" className="rounded-2xl bg-red-50 p-5 font-semibold text-red-800"><p>{feedback?.text ?? (locale === "ar" ? "تعذر تحميل الملف الشخصي." : "Profile could not be loaded.")}</p><Button type="button" variant="secondary" className="mt-4" onClick={() => { setLoading(true); setFeedback(null); setLoadAttempt((attempt) => attempt + 1); }}><RefreshCw className="size-4" />{translate(locale, "common.retry")}</Button></div>;
   return <section className="rounded-3xl border border-line bg-surface-strong p-6 shadow-soft md:p-9">
     <div className="flex items-center gap-4"><span className="grid size-12 place-items-center rounded-2xl bg-brand-strong text-white"><UserRound className="size-5" /></span><div><h2 className="font-display text-2xl font-semibold">{translate(locale, "account.overview")}</h2><p className="text-sm text-muted">{translate(locale, "account.profileText")}</p></div></div>
     {feedback ? <p role={feedback.tone === "error" ? "alert" : "status"} className={feedback.tone === "error" ? "mt-5 rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-800" : "mt-5 rounded-xl bg-accent/5 p-3 text-sm font-semibold text-accent"}>{feedback.text}</p> : null}

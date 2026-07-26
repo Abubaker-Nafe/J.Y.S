@@ -60,19 +60,11 @@ export async function validateImageFile(file: File): Promise<{
 }
 
 class LocalImageStorage implements ImageStorage {
-  private readonly root: string;
-
-  constructor() {
-    // Uploads are runtime data, never build inputs. The tracing hint prevents
-    // Next from pulling the whole repository into this route's file manifest.
-    this.root = path.join(/*turbopackIgnore: true*/ process.cwd(), "public", "uploads");
-  }
-
   async save(file: File): Promise<StoredImage> {
     const { bytes, mimeType } = await validateImageFile(file);
     const filename = `${randomUUID()}.${MIME_EXTENSIONS[mimeType]}`;
-    await mkdir(this.root, { recursive: true });
-    await writeFile(path.join(this.root, filename), bytes, { flag: "wx" });
+    await mkdir(path.join(process.cwd(), "public/uploads"), { recursive: true });
+    await writeFile(path.join(process.cwd(), "public/uploads", filename), bytes, { flag: "wx" });
     return {
       storageKey: filename,
       url: `/uploads/${filename}`,
@@ -86,7 +78,7 @@ class LocalImageStorage implements ImageStorage {
       throw new InvalidImageError("Invalid storage key");
     }
     try {
-      await unlink(path.join(this.root, storageKey));
+      await unlink(path.join(process.cwd(), "public/uploads", storageKey));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseJsonBody, ValidationError } from "@/lib/validation/common";
+import { parseJsonBody } from "@/lib/validation/common";
 
 function jsonRequest(body: string, headers?: HeadersInit) {
   return new Request("https://shop.example.com/api/test", {
@@ -16,7 +16,7 @@ describe("bounded JSON request parsing", () => {
 
   it("fast-fails an oversized declared Content-Length", async () => {
     const request = jsonRequest("{}", { "Content-Length": "1024" });
-    await expect(parseJsonBody(request, 32)).rejects.toMatchObject<Partial<ValidationError>>({
+    await expect(parseJsonBody(request, 32)).rejects.toMatchObject({
       status: 413,
       message: "Request body is too large",
     });
@@ -27,13 +27,13 @@ describe("bounded JSON request parsing", () => {
     const byteLength = new TextEncoder().encode(body).byteLength;
     const request = jsonRequest(body);
     expect(request.headers.get("content-length")).toBeNull();
-    await expect(parseJsonBody(request, byteLength - 1)).rejects.toMatchObject<Partial<ValidationError>>({
+    await expect(parseJsonBody(request, byteLength - 1)).rejects.toMatchObject({
       status: 413,
     });
   });
 
   it("rejects malformed JSON without exposing parser details", async () => {
-    await expect(parseJsonBody(jsonRequest("{"), 32)).rejects.toMatchObject<Partial<ValidationError>>({
+    await expect(parseJsonBody(jsonRequest("{"), 32)).rejects.toMatchObject({
       status: 400,
       message: "Request body must be valid JSON",
     });

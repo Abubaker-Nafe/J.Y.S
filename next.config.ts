@@ -1,11 +1,11 @@
 import type { NextConfig } from "next";
+import { getAllowedDevOrigins } from "./src/lib/dev-origins";
 
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
-  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
   {
     key: "Content-Security-Policy",
     value: [
@@ -21,14 +21,17 @@ const securityHeaders = [
       "frame-ancestors 'none'",
     ].join("; "),
   },
-  ...(process.env.NODE_ENV === "production" ? [{ key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" }] : []),
+  ...(process.env.NODE_ENV === "production" ? [
+    { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+    { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
+  ] : []),
 ];
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  // Playwright and local preview use the loopback address. Next blocks its
-  // development client (including hydration/HMR) unless that origin is named.
-  allowedDevOrigins: ["127.0.0.1"],
+  // Next blocks the development client (including hydration/HMR) on additional
+  // hosts unless they are explicitly trusted. DEV_ALLOWED_ORIGINS is local-only.
+  allowedDevOrigins: getAllowedDevOrigins(),
   outputFileTracingRoot: process.cwd(),
   turbopack: {
     root: process.cwd(),

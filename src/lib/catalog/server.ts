@@ -53,7 +53,7 @@ const productInclude = {
 type ProductRow = Prisma.ProductGetPayload<{ include: typeof productInclude }>;
 
 function configured() {
-  return Boolean(process.env.DATABASE_URL);
+  return process.env.E2E_DEMO_CATALOG !== "true" && Boolean(process.env.DATABASE_URL);
 }
 
 function unavailableReason(): "not-configured" | "query-failed" {
@@ -82,13 +82,13 @@ function mapProduct(product: ProductRow, categories: Category[]): Product {
     categorySlug: product.category.slug,
     price: Number(product.price),
     stock: product.variants.length
-      ? product.variants.filter((variant) => variant.isAvailable).reduce((total, variant) => total + variant.stockQuantity, 0)
+      ? product.variants.filter((variant) => variant.isActive && variant.isAvailable).reduce((total, variant) => total + variant.stockQuantity, 0)
       : product.stockQuantity,
     featured: product.isFeatured,
     createdAt: product.createdAt.toISOString(),
     images: product.images.map((image) => image.url),
     imageAlts: product.images.map((image) => ({ ar: image.altAr || product.nameAr, en: image.altEn || product.nameEn })),
-    variants: product.variants.map((variant) => ({
+    variants: product.variants.filter((variant) => variant.isActive).map((variant) => ({
       id: variant.id,
       sku: variant.sku,
       label: { ar: variant.labelAr, en: variant.labelEn },
@@ -177,11 +177,12 @@ export async function getStorefrontProductsPage(input: StorefrontProductQuery = 
       { sku: { contains: query.q, mode: "insensitive" } },
     ] });
     if (query.available) filters.push({ OR: [
-      { variants: { some: { isAvailable: true, stockQuantity: { gt: 0 } } } },
+      { variants: { some: { isActive: true, isAvailable: true, stockQuantity: { gt: 0 } } } },
       { variants: { none: {} }, stockQuantity: { gt: 0 } },
     ] });
     const where: Prisma.ProductWhereInput = {
       status: "ACTIVE",
+      isAvailable: true,
       archivedAt: null,
       category: { isActive: true, archivedAt: null, ...(query.category ? { slug: query.category } : {}) },
       ...(filters.length ? { AND: filters } : {}),
@@ -221,7 +222,7 @@ export const getStorefrontCatalog = cache(async (): Promise<StorefrontCatalog> =
     const categoryResult = await getStorefrontCategories();
     if (categoryResult.source === "unavailable") return { products: [], categories: [], source: "unavailable", unavailableReason: categoryResult.unavailableReason };
     const rows = await db.product.findMany({
-      where: { status: "ACTIVE", archivedAt: null, category: { isActive: true, archivedAt: null } },
+      where: { status: "ACTIVE", isAvailable: true, archivedAt: null, category: { isActive: true, archivedAt: null } },
       orderBy: [{ isFeatured: "desc" }, { createdAt: "desc" }],
       include: productInclude,
     });
@@ -241,7 +242,7 @@ export const getStorefrontHomeCatalog = cache(async (): Promise<StorefrontCatalo
     const categoryResult = await getStorefrontCategories();
     if (categoryResult.source === "unavailable") return { products: [], categories: [], source: "unavailable", unavailableReason: categoryResult.unavailableReason };
     const rows = await db.product.findMany({
-      where: { status: "ACTIVE", archivedAt: null, isFeatured: true, category: { isActive: true, archivedAt: null } },
+      where: { status: "ACTIVE", isAvailable: true, archivedAt: null, isFeatured: true, category: { isActive: true, archivedAt: null } },
       orderBy: { createdAt: "desc" },
       take: 4,
       include: productInclude,
@@ -267,12 +268,12 @@ export const getStorefrontProduct = cache(async (slug: string): Promise<Storefro
     const categoryResult = await getStorefrontCategories();
     if (categoryResult.source === "unavailable") return { related: [], source: "unavailable", unavailableReason: categoryResult.unavailableReason };
     const row = await db.product.findFirst({
-      where: { slug, status: "ACTIVE", archivedAt: null, category: { isActive: true, archivedAt: null } },
+      where: { slug, status: "ACTIVE", isAvailable: true, archivedAt: null, category: { isActive: true, archivedAt: null } },
       include: productInclude,
     });
     if (!row) return { related: [], source: "database" };
     const relatedRows = await db.product.findMany({
-      where: { id: { not: row.id }, categoryId: row.categoryId, status: "ACTIVE", archivedAt: null },
+      where: { id: { not: row.id }, categoryId: row.categoryId, status: "ACTIVE", isAvailable: true, archivedAt: null },
       orderBy: [{ isFeatured: "desc" }, { createdAt: "desc" }],
       take: 4,
       include: productInclude,
@@ -300,7 +301,7 @@ export async function getStorefrontProductsByIds(ids: string[]): Promise<Storefr
     const categoryResult = await getStorefrontCategories();
     if (categoryResult.source === "unavailable") return { products: [], categories: [], source: "unavailable", unavailableReason: categoryResult.unavailableReason };
     const rows = await db.product.findMany({
-      where: { id: { in: uniqueIds }, status: "ACTIVE", archivedAt: null, category: { isActive: true, archivedAt: null } },
+      where: { id: { in: uniqueIds }, status: "ACTIVE", isAvailable: true, archivedAt: null, category: { isActive: true, archivedAt: null } },
       include: productInclude,
     });
     const byId = new Map(rows.map((product) => [product.id, mapProduct(product, categoryResult.categories)]));

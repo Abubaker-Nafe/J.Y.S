@@ -12,6 +12,8 @@ const optionalEnvSchema = z.object({
   AUTH_SECRET: z.string().optional(),
   APP_URL: z.string().optional(),
   NEXT_PUBLIC_APP_URL: z.string().optional(),
+  DEV_ALLOWED_ORIGINS: z.string().optional(),
+  TRUST_PROXY: z.enum(["true", "false"]).default("false"),
   EMAIL_PROVIDER: z.enum(["console", "resend"]).default("console"),
   // Additional drivers belong behind ImageStorage only after their adapter is
   // actually shipped. Do not accept configuration that cannot be fulfilled.

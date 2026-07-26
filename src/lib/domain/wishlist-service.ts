@@ -5,7 +5,7 @@ const wishlistInclude = {
   product: {
     include: {
       images: { orderBy: { displayOrder: "asc" as const }, take: 1 },
-      variants: { select: { stockQuantity: true, isAvailable: true } },
+      variants: { select: { stockQuantity: true, isActive: true, isAvailable: true } },
     },
   },
 };
@@ -29,8 +29,9 @@ export async function getWishlist(userId: string) {
       isAvailable:
         item.product.status === "ACTIVE" &&
         !item.product.archivedAt &&
+        item.product.isAvailable &&
         (item.product.variants.length > 0
-          ? item.product.variants.some((variant) => variant.isAvailable && variant.stockQuantity > 0)
+          ? item.product.variants.some((variant) => variant.isActive && variant.isAvailable && variant.stockQuantity > 0)
           : item.product.stockQuantity > 0),
     },
   }));
@@ -38,7 +39,7 @@ export async function getWishlist(userId: string) {
 
 export async function addWishlistItem(userId: string, productId: string) {
   const product = await db.product.findFirst({
-    where: { id: productId, status: "ACTIVE", archivedAt: null },
+    where: { id: productId, status: "ACTIVE", archivedAt: null, isAvailable: true },
     select: { id: true },
   });
   if (!product) throw new ValidationError("Product was not found");

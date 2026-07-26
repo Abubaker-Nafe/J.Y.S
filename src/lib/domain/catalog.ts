@@ -1,10 +1,12 @@
 export type ProductAvailabilityInput = {
   status: "DRAFT" | "ACTIVE" | "HIDDEN" | "ARCHIVED";
   archivedAt: Date | null;
+  isAvailable: boolean;
   stockQuantity: number;
   hasVariants: boolean;
   variant?: {
     belongsToProduct: boolean;
+    isActive: boolean;
     isAvailable: boolean;
     stockQuantity: number;
   } | null;
@@ -19,14 +21,14 @@ export type AvailabilityResult =
     };
 
 export function getProductAvailability(input: ProductAvailabilityInput): AvailabilityResult {
-  if (input.status !== "ACTIVE" || input.archivedAt) {
+  if (input.status !== "ACTIVE" || input.archivedAt || !input.isAvailable) {
     return { available: false, availableStock: 0, reason: "PRODUCT_UNAVAILABLE" };
   }
   if (input.hasVariants && !input.variant) {
     return { available: false, availableStock: 0, reason: "VARIANT_REQUIRED" };
   }
   if (input.variant) {
-    if (!input.variant.belongsToProduct || !input.variant.isAvailable) {
+    if (!input.variant.belongsToProduct || !input.variant.isActive || !input.variant.isAvailable) {
       return { available: false, availableStock: 0, reason: "VARIANT_UNAVAILABLE" };
     }
     if (input.variant.stockQuantity < 1) {

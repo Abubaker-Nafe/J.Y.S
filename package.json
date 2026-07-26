@@ -15,7 +15,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test",
+    "test:e2e": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-e2e.ps1 -Suite storefront",
+    "test:e2e:db": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-e2e.ps1 -Suite database",
+    "test:e2e:hosts": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-e2e.ps1 -Suite hosts",
     "test:e2e:ui": "playwright test --ui",
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",
@@ -33,7 +35,7 @@
     "date-fns": "^4.1.0",
     "jose": "^6.1.0",
     "lucide-react": "^0.548.0",
-    "next": "16.2.10",
+    "next": "16.2.11",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-hook-form": "^7.65.0",
@@ -54,9 +56,9 @@
     "@types/react-dom": "^19.2.2",
     "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^9.37.0",
-    "eslint-config-next": "16.2.10",
+    "eslint-config-next": "16.2.11",
     "jsdom": "^27.0.0",
-    "postcss": "8.5.10",
+    "postcss": "8.5.22",
     "prisma": "6.19.3",
     "tailwindcss": "4.3.3",
     "tsx": "^4.20.6",
@@ -64,7 +66,10 @@
     "vitest": "4.1.10"
   },
   "overrides": {
+    "brace-expansion": "5.0.8",
     "effect": "^3.20.0",
-    "postcss": "8.5.10"
+    "minimatch": "10.2.5",
+    "postcss": "8.5.22",
+    "sharp": "0.35.3"
   }
 }

@@ -22,8 +22,11 @@ const emptyProduct: AdminProductDetail = {
   price: 0,
   stock: 0,
   lowStockThreshold: 5,
+  status: "ACTIVE",
+  available: true,
   active: true,
   featured: false,
+  variationCount: 0,
   archivedAt: null,
   categoryId: "",
   categoryNameAr: "",
@@ -51,7 +54,7 @@ export function ProductForm({ locale, product: suppliedProduct, categories, defa
   const normalizedImages = useMemo(() => images.map((image, index) => ({ ...image, position: index, primary: index === 0 })), [images]);
 
   function addVariant() {
-    setVariants((current) => [...current, { sku: "", labelAr: "", labelEn: "", priceOverride: null, stock: 0, active: true }]);
+    setVariants((current) => [...current, { sku: "", labelAr: "", labelEn: "", priceOverride: null, stock: 0, available: true, active: true }]);
   }
 
   function updateVariant(index: number, key: keyof DraftVariant, value: string | number | boolean | null) {
@@ -102,10 +105,11 @@ export function ProductForm({ locale, product: suppliedProduct, categories, defa
       stock: Number(form.get("stock")),
       lowStockThreshold: Number(form.get("lowStockThreshold")),
       categoryId: String(form.get("categoryId") ?? ""),
+      available: form.get("available") === "on",
       active: form.get("active") === "on",
       featured: form.get("featured") === "on",
       images: normalizedImages.map(({ id, storageKey, url, mimeType, sizeBytes, altAr, altEn, position, primary }) => ({ id, storageKey, url, mimeType, sizeBytes, altAr, altEn, position, primary })),
-      variants: variants.map(({ id, sku, labelAr, labelEn, priceOverride, stock, active }) => ({ id, sku, labelAr, labelEn, priceOverride, stock, active })),
+      variants: variants.map(({ id, sku, labelAr, labelEn, priceOverride, stock, available, active }) => ({ id, sku, labelAr, labelEn, priceOverride, stock, available, active })),
     };
     const response = await adminFetch<{ id: string }>(editing ? `/api/admin/products/${product.id}` : "/api/admin/products", { method: editing ? "PATCH" : "POST", body: JSON.stringify(payload) });
     setPending(false);
@@ -150,7 +154,8 @@ export function ProductForm({ locale, product: suppliedProduct, categories, defa
           <TextArea name="descriptionEn" label="English description" defaultValue={product.descriptionEn} required error={errorFor("descriptionEn")} dir="ltr" />
         </div>
         <div className={`${styles.row} ${styles.sectionGap}`}>
-          <label className={styles.checkbox}><input name="active" type="checkbox" defaultChecked={product.active} />{locale === "ar" ? "متاح في المتجر" : "Available in storefront"}</label>
+          <label className={styles.checkbox}><input name="available" type="checkbox" defaultChecked={product.available} />{locale === "ar" ? "متاح للبيع" : "Available for sale"}</label>
+          <label className={styles.checkbox}><input name="active" type="checkbox" defaultChecked={product.active} />{locale === "ar" ? "نشط وظاهر في المتجر" : "Active and visible in storefront"}</label>
           <label className={styles.checkbox}><input name="featured" type="checkbox" defaultChecked={product.featured} />{locale === "ar" ? "منتج مميز" : "Featured product"}</label>
         </div>
       </section>
@@ -203,7 +208,8 @@ export function ProductForm({ locale, product: suppliedProduct, categories, defa
                   <div className={styles.field}><label htmlFor={`variant-sku-${index}`}>SKU</label><input id={`variant-sku-${index}`} className={styles.input} dir="ltr" required value={variant.sku} onChange={(event) => updateVariant(index, "sku", event.target.value)} /></div>
                   <div className={styles.field}><label htmlFor={`variant-price-${index}`}>{locale === "ar" ? "سعر بديل (اختياري)" : "Price override (optional)"}</label><input id={`variant-price-${index}`} className={styles.input} type="number" min="0" step="0.01" value={variant.priceOverride ?? ""} onChange={(event) => updateVariant(index, "priceOverride", event.target.value === "" ? null : Number(event.target.value))} /></div>
                   <div className={styles.field}><label htmlFor={`variant-stock-${index}`}>{locale === "ar" ? "المخزون" : "Stock"}</label><input id={`variant-stock-${index}`} className={styles.input} type="number" min="0" step="1" required readOnly={editing && Boolean(variant.id)} aria-describedby={editing && variant.id ? "stock-edit-note" : undefined} value={variant.stock} onChange={(event) => updateVariant(index, "stock", Number(event.target.value))} /></div>
-                  <label className={styles.checkbox}><input type="checkbox" checked={variant.active} onChange={(event) => updateVariant(index, "active", event.target.checked)} />{locale === "ar" ? "متاح" : "Available"}</label>
+                  <label className={styles.checkbox}><input type="checkbox" checked={variant.available} onChange={(event) => updateVariant(index, "available", event.target.checked)} />{locale === "ar" ? "متاح للبيع" : "Available"}</label>
+                  <label className={styles.checkbox}><input type="checkbox" checked={variant.active} onChange={(event) => updateVariant(index, "active", event.target.checked)} />{locale === "ar" ? "نشط" : "Active"}</label>
                 </div>
                 <button className={`${styles.buttonDanger} ${styles.sectionGap}`} type="button" onClick={() => setVariants((current) => current.filter((_, position) => position !== index))}><Trash2 size={16} />{locale === "ar" ? "إزالة الخيار" : "Remove variant"}</button>
               </fieldset>

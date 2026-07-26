@@ -13,6 +13,7 @@ export type ReportFilters = {
   categoryId?: string;
   fulfillment?: "ALL" | "DELIVERY" | "PICKUP";
   payment?: "ALL" | "CASH_ON_DELIVERY" | "CASH_ON_PICKUP";
+  paymentStatus?: "ALL" | "PENDING" | "PAID" | "CANCELLED";
   group?: "day" | "week" | "month";
 };
 
@@ -49,6 +50,7 @@ export async function getReportData(filters: ReportFilters = {}): Promise<AdminR
   const categoryId = filters.categoryId?.trim() ?? "";
   const fulfillment = filters.fulfillment ?? "ALL";
   const payment = filters.payment ?? "ALL";
+  const paymentStatus = filters.paymentStatus ?? "ALL";
   const group = filters.group ?? "day";
   const statusWhere: Prisma.OrderWhereInput = status === "ALL" ? {} : status === "FULFILLED" ? { status: { in: ["DELIVERED", "COLLECTED"] } } : { status };
   const range = { gte: fromDate, lte: toDate };
@@ -57,21 +59,22 @@ export async function getReportData(filters: ReportFilters = {}): Promise<AdminR
     ...(categoryId ? { items: { some: { product: { categoryId } } } } : {}),
     ...(fulfillment === "ALL" ? {} : { fulfillmentMethod: fulfillment }),
     ...(payment === "ALL" ? {} : { paymentMethod: payment }),
+    ...(paymentStatus === "ALL" ? {} : { paymentStatus }),
   };
   const orderWhere: Prisma.OrderWhereInput = { ...dimensionWhere, ...statusWhere };
   const productDimensionWhere: Prisma.ProductWhereInput = categoryId ? { categoryId } : {};
 
   const [reportOrders, allRangeOrders, products, itemGroups, viewGroups, wishlistGroups, cartGroups, totalCustomers, newCustomers, customerRows, abandonedCarts, pairOrders] = await Promise.all([
-    db.order.findMany({ where: orderWhere, select: { id: true, createdAt: true, total: true, status: true, fulfillmentMethod: true } }),
+    db.order.findMany({ where: orderWhere, orderBy: { createdAt: "desc" }, select: { id: true, orderNumber: true, createdAt: true, customerName: true, customerEmail: true, customerPhone: true, fulfillmentMethod: true, paymentMethod: true, paymentStatus: true, status: true, currency: true, subtotal: true, deliveryFee: true, total: true, _count: { select: { items: true } } } }),
     db.order.findMany({ where: dimensionWhere, select: { status: true, fulfillmentMethod: true } }),
-    db.product.findMany({ where: { archivedAt: null, ...productDimensionWhere }, select: { id: true, sku: true, nameAr: true, nameEn: true, stockQuantity: true, lowStockThreshold: true, variants: { where: { isAvailable: true }, select: { stockQuantity: true } }, category: { select: { id: true, nameAr: true, nameEn: true } } } }),
+    db.product.findMany({ where: { archivedAt: null, ...productDimensionWhere }, select: { id: true, sku: true, nameAr: true, nameEn: true, status: true, isAvailable: true, stockQuantity: true, lowStockThreshold: true, variants: { where: { isActive: true }, select: { stockQuantity: true } }, category: { select: { id: true, nameAr: true, nameEn: true } } } }),
     db.orderItem.groupBy({ by: ["productId"], where: { productId: { not: null }, order: orderWhere }, _sum: { quantity: true, lineTotal: true } }),
     db.productView.groupBy({ by: ["productId"], where: { viewedAt: range, ...(categoryId ? { product: { categoryId } } : {}) }, _count: { _all: true } }),
     db.wishlistItem.groupBy({ by: ["productId"], where: { createdAt: range, ...(categoryId ? { product: { categoryId } } : {}) }, _count: { _all: true } }),
     db.cartItem.groupBy({ by: ["productId"], where: { createdAt: range, cart: { status: "ACTIVE" }, ...(categoryId ? { product: { categoryId } } : {}) }, _sum: { quantity: true } }),
     db.user.count({ where: { role: "CUSTOMER" } }),
     db.user.count({ where: { role: "CUSTOMER", createdAt: range } }),
-    db.user.findMany({ where: { role: "CUSTOMER" }, select: { id: true, name: true, email: true, orders: { where: orderWhere, select: { total: true, createdAt: true }, orderBy: { createdAt: "desc" } } } }),
+    db.user.findMany({ where: { role: "CUSTOMER" }, select: { id: true, name: true, email: true, phone: true, createdAt: true, addresses: { where: { isActive: true }, take: 1, select: { city: { select: { nameAr: true, nameEn: true } } } }, orders: { where: orderWhere, select: { total: true, createdAt: true }, orderBy: { createdAt: "desc" } } } }),
     db.cart.count({ where: { OR: [{ status: "ABANDONED", updatedAt: range }, { status: "ACTIVE", updatedAt: { lte: new Date(now.getTime() - 7 * 86_400_000) } }] } }),
     db.order.findMany({ where: { ...dimensionWhere, status: { in: ["DELIVERED", "COLLECTED"] } }, select: { items: { select: { productId: true, productNameAr: true, productNameEn: true } } } }),
   ]);
@@ -80,7 +83,7 @@ export async function getReportData(filters: ReportFilters = {}): Promise<AdminR
   const viewMap = new Map(viewGroups.map((group) => [group.productId, group._count._all]));
   const wishlistMap = new Map(wishlistGroups.map((group) => [group.productId, group._count._all]));
   const cartMap = new Map(cartGroups.map((group) => [group.productId, group._sum.quantity ?? 0]));
-  const productRows = products.map((product) => ({ id: product.id, sku: product.sku, nameAr: product.nameAr, nameEn: product.nameEn, units: itemMap.get(product.id)?.units ?? 0, revenue: itemMap.get(product.id)?.revenue ?? 0, views: viewMap.get(product.id) ?? 0, wishlists: wishlistMap.get(product.id) ?? 0, cartAdds: cartMap.get(product.id) ?? 0, stock: product.variants.length ? product.variants.reduce((sum, variant) => sum + variant.stockQuantity, 0) : product.stockQuantity, category: product.category })).sort((a, b) => b.revenue - a.revenue || b.units - a.units);
+  const productRows = products.map((product) => ({ id: product.id, sku: product.sku, nameAr: product.nameAr, nameEn: product.nameEn, units: itemMap.get(product.id)?.units ?? 0, revenue: itemMap.get(product.id)?.revenue ?? 0, views: viewMap.get(product.id) ?? 0, wishlists: wishlistMap.get(product.id) ?? 0, cartAdds: cartMap.get(product.id) ?? 0, stock: product.variants.length ? product.variants.reduce((sum, variant) => sum + variant.stockQuantity, 0) : product.stockQuantity, lowStockThreshold: product.lowStockThreshold, active: product.status === "ACTIVE", available: product.isAvailable, category: product.category })).sort((a, b) => b.revenue - a.revenue || b.units - a.units);
   const categoryMap = new Map<string, { id: string; nameAr: string; nameEn: string; units: number; revenue: number }>();
   for (const product of productRows) {
     const current = categoryMap.get(product.category.id) ?? { ...product.category, units: 0, revenue: 0 };
@@ -97,7 +100,7 @@ export async function getReportData(filters: ReportFilters = {}): Promise<AdminR
   for (const order of reportOrders) { const key = bucketKey(order.createdAt, group); const bucket = salesMap.get(key); if (bucket) { bucket.revenue += safeNumber(order.total); bucket.orders += 1; } }
   const revenue = reportOrders.reduce((sum, order) => sum + safeNumber(order.total), 0);
 
-  const customers = customerRows.map((customer) => ({ id: customer.id, name: customer.name, email: customer.email, orderCount: customer.orders.length, spending: customer.orders.reduce((sum, order) => sum + safeNumber(order.total), 0), lastOrderAt: customer.orders[0]?.createdAt.toISOString() ?? null })).filter((customer) => customer.orderCount > 0).sort((a, b) => b.spending - a.spending || b.orderCount - a.orderCount);
+  const customers = customerRows.map((customer) => ({ id: customer.id, name: customer.name, email: customer.email, phone: customer.phone ?? "", cityAr: customer.addresses[0]?.city.nameAr ?? null, cityEn: customer.addresses[0]?.city.nameEn ?? null, orderCount: customer.orders.length, spending: customer.orders.reduce((sum, order) => sum + safeNumber(order.total), 0), joinedAt: customer.createdAt.toISOString(), lastOrderAt: customer.orders[0]?.createdAt.toISOString() ?? null })).sort((a, b) => b.spending - a.spending || b.orderCount - a.orderCount);
   const returningCustomers = customerRows.filter((customer) => customer.orders.length > 1).length;
 
   const pairMap = new Map<string, { count: number; ar: string; en: string }>();
@@ -113,19 +116,34 @@ export async function getReportData(filters: ReportFilters = {}): Promise<AdminR
   const notSelling = productRows.filter((product) => product.units === 0).slice(0, 3);
   const topCategory = [...categoryMap.values()].sort((a, b) => b.revenue - a.revenue)[0];
   const popularWishlist = [...productRows].sort((a, b) => b.wishlists - a.wishlists)[0];
+  const cartNotOrdered = [...productRows].sort((a, b) => b.cartAdds - a.cartAdds).find((product) => product.cartAdds > 0 && product.units === 0);
+  const inactiveCustomers = customerRows.filter((customer) => !customer.orders[0] || customer.orders[0].createdAt < new Date(now.getTime() - 90 * 86_400_000)).length;
+  const salesSeries = [...salesMap].map(([period, bucket]) => ({ period: group === "month" ? period : period.slice(5), ...bucket }));
   const insights: AdminReportData["insights"] = [];
   if (restock) insights.push({ key: "restock", titleAr: "أولوية إعادة التخزين", titleEn: "Restock priority", detailAr: `${restock.nameAr}: متاح ${restock.stock}، ومبيع ${restock.units}.`, detailEn: `${restock.nameEn}: ${restock.stock} available and ${restock.units} sold.` });
   if (notSelling.length) insights.push({ key: "not-selling", titleAr: "منتجات دون مبيعات", titleEn: "Products without sales", detailAr: notSelling.map((item) => item.nameAr).join("، "), detailEn: notSelling.map((item) => item.nameEn).join(", ") });
   if (topCategory && topCategory.revenue > 0) insights.push({ key: "top-category", titleAr: "التصنيف الأعلى إيرادًا", titleEn: "Highest-revenue category", detailAr: `${topCategory.nameAr}: ${topCategory.revenue.toFixed(2)}`, detailEn: `${topCategory.nameEn}: ${topCategory.revenue.toFixed(2)}` });
   if (bestPair && bestPair.count >= 2) insights.push({ key: "pair", titleAr: "يُشترى معًا", titleEn: "Frequently purchased together", detailAr: `${bestPair.ar} (${bestPair.count})`, detailEn: `${bestPair.en} (${bestPair.count})` });
   if (popularWishlist && popularWishlist.wishlists > 0) insights.push({ key: "wishlist", titleAr: "الأكثر حفظًا", titleEn: "Most wishlisted", detailAr: `${popularWishlist.nameAr}: ${popularWishlist.wishlists}`, detailEn: `${popularWishlist.nameEn}: ${popularWishlist.wishlists}` });
+  if (cartNotOrdered) insights.push({ key: "cart-not-ordered", titleAr: "في السلات دون طلب", titleEn: "In carts but not ordered", detailAr: `${cartNotOrdered.nameAr}: ${cartNotOrdered.cartAdds}`, detailEn: `${cartNotOrdered.nameEn}: ${cartNotOrdered.cartAdds}` });
+  if (inactiveCustomers > 0) insights.push({ key: "inactive-customers", titleAr: "عملاء غير نشطين", titleEn: "Inactive customers", detailAr: `${inactiveCustomers} عميل لم يطلب خلال 90 يومًا.`, detailEn: `${inactiveCustomers} customers have not ordered in 90 days.` });
+  if (salesSeries.length >= 2) {
+    const midpoint = Math.floor(salesSeries.length / 2);
+    const previousRevenue = salesSeries.slice(0, midpoint).reduce((sum, item) => sum + item.revenue, 0);
+    const currentRevenue = salesSeries.slice(midpoint).reduce((sum, item) => sum + item.revenue, 0);
+    if (previousRevenue > 0) {
+      const change = ((currentRevenue - previousRevenue) / previousRevenue) * 100;
+      insights.push({ key: "sales-trend", titleAr: "تغير اتجاه المبيعات", titleEn: "Sales trend change", detailAr: `${change >= 0 ? "+" : ""}${change.toFixed(1)}% مقارنة بنصف الفترة السابق.`, detailEn: `${change >= 0 ? "+" : ""}${change.toFixed(1)}% versus the previous half of the period.` });
+    }
+  }
   if (abandonedCarts > 0) insights.push({ key: "carts", titleAr: "سلات غير مكتملة", titleEn: "Unconverted carts", detailAr: `${abandonedCarts} سلات تحتاج إلى متابعة الاتجاه العام.`, detailEn: `${abandonedCarts} carts are unconverted; monitor the trend.` });
 
   return {
-    from: dateKey(fromDate), to: dateKey(toDate), status, categoryId, fulfillment, payment, group,
-    metrics: { revenue, orderCount: reportOrders.length, averageOrderValue: reportOrders.length ? revenue / reportOrders.length : 0, fulfilledOrders: allRangeOrders.filter((order) => order.status === "DELIVERED" || order.status === "COLLECTED").length, cancelledOrders: allRangeOrders.filter((order) => order.status === "CANCELLED").length, deliveryOrders: allRangeOrders.filter((order) => order.fulfillmentMethod === "DELIVERY").length, pickupOrders: allRangeOrders.filter((order) => order.fulfillmentMethod === "PICKUP").length, registeredCustomers: totalCustomers, newCustomers, returningCustomers, abandonedCarts },
-    salesSeries: [...salesMap].map(([period, bucket]) => ({ period: group === "month" ? period : period.slice(5), ...bucket })),
-    products: productRows.map((product) => ({ id: product.id, sku: product.sku, nameAr: product.nameAr, nameEn: product.nameEn, units: product.units, revenue: product.revenue, views: product.views, wishlists: product.wishlists, cartAdds: product.cartAdds, stock: product.stock })),
+    from: dateKey(fromDate), to: dateKey(toDate), status, categoryId, fulfillment, payment, paymentStatus, group,
+    metrics: { revenue, orderCount: reportOrders.length, averageOrderValue: reportOrders.length ? revenue / reportOrders.length : 0, fulfilledOrders: allRangeOrders.filter((order) => order.status === "DELIVERED" || order.status === "COLLECTED").length, deliveredOrders: allRangeOrders.filter((order) => order.status === "DELIVERED").length, collectedOrders: allRangeOrders.filter((order) => order.status === "COLLECTED").length, cancelledOrders: allRangeOrders.filter((order) => order.status === "CANCELLED").length, deliveryOrders: allRangeOrders.filter((order) => order.fulfillmentMethod === "DELIVERY").length, pickupOrders: allRangeOrders.filter((order) => order.fulfillmentMethod === "PICKUP").length, registeredCustomers: totalCustomers, newCustomers, returningCustomers, abandonedCarts },
+    salesSeries,
+    orders: reportOrders.map((order) => ({ orderNumber: order.orderNumber, createdAt: order.createdAt.toISOString(), customerName: order.customerName, customerEmail: order.customerEmail, customerPhone: order.customerPhone, fulfillmentMethod: order.fulfillmentMethod, paymentMethod: order.paymentMethod, paymentStatus: order.paymentStatus, status: order.status, currency: order.currency, subtotal: safeNumber(order.subtotal), deliveryFee: safeNumber(order.deliveryFee), total: safeNumber(order.total), itemCount: order._count.items })),
+    products: productRows.map((product) => ({ id: product.id, sku: product.sku, nameAr: product.nameAr, nameEn: product.nameEn, units: product.units, revenue: product.revenue, views: product.views, wishlists: product.wishlists, cartAdds: product.cartAdds, stock: product.stock, lowStockThreshold: product.lowStockThreshold, categoryAr: product.category.nameAr, categoryEn: product.category.nameEn, active: product.active, available: product.available })),
     categories: [...categoryMap.values()].sort((a, b) => b.revenue - a.revenue),
     customers: customers.slice(0, 50),
     insights,

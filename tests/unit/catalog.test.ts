@@ -4,6 +4,7 @@ import { getProductAvailability, validateRequestedQuantity } from "@/lib/domain/
 const activeProduct = {
   status: "ACTIVE" as const,
   archivedAt: null,
+  isAvailable: true,
   stockQuantity: 5,
   hasVariants: false,
 };
@@ -29,9 +30,18 @@ describe("product availability", () => {
       getProductAvailability({
         ...activeProduct,
         hasVariants: true,
-        variant: { belongsToProduct: true, isAvailable: false, stockQuantity: 4 },
+        variant: { belongsToProduct: true, isActive: true, isAvailable: false, stockQuantity: 4 },
       }),
     ).toMatchObject({ available: false, reason: "VARIANT_UNAVAILABLE" });
+    expect(getProductAvailability({ ...activeProduct, isAvailable: false })).toMatchObject({
+      available: false,
+      reason: "PRODUCT_UNAVAILABLE",
+    });
+    expect(getProductAvailability({
+      ...activeProduct,
+      hasVariants: true,
+      variant: { belongsToProduct: true, isActive: false, isAvailable: true, stockQuantity: 4 },
+    })).toMatchObject({ available: false, reason: "VARIANT_UNAVAILABLE" });
   });
 
   it("enforces positive integer quantities and stock limits", () => {

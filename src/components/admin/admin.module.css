@@ -54,7 +54,7 @@
 .actor strong, .actor span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .actor span { margin-block-start: 0.15rem; color: var(--admin-muted); font-size: 0.78rem; }
 .main { width: min(100%, 100rem); margin-inline: auto; padding: clamp(1rem, 3vw, 2.5rem); }
-.mobileMenuButton, .mobileClose { display: none; }
+.mobileMenuButton, .mobileClose { display: none !important; }
 .mobileBackdrop { display: none; }
 .localeLink { display: inline-flex; min-height: 2.5rem; align-items: center; gap: 0.45rem; padding: 0.5rem 0.7rem; color: var(--admin-ink); text-decoration: none; border: 1px solid var(--admin-border); border-radius: 0.55rem; background: var(--admin-panel); }
 .localeLink:hover { border-color: var(--admin-accent); }
@@ -170,7 +170,7 @@
   [dir="rtl"] .sidebar { inset: 0 0 0 auto; transform: translateX(105%); }
   .sidebarOpen { visibility: visible; transform: translateX(0) !important; transition-delay: 0s; }
   .mobileBackdrop { position: fixed; z-index: 40; inset: 0; display: block; background: rgb(7 21 15 / 0.52); border: 0; }
-  .mobileMenuButton, .mobileClose { display: inline-flex; }
+  .mobileMenuButton, .mobileClose { display: inline-flex !important; }
   .mobileClose { margin-inline-start: auto; color: white; background: transparent; border: 1px solid #446357; }
   .topbar { min-height: 4rem; }
   .actor { display: none; }

@@ -10,6 +10,7 @@ import type {
   AdminContentPage,
   AdminCustomer,
   AdminDashboardData,
+  AdminInventoryAdjustment,
   AdminInventoryRow,
   AdminOrderDetail,
   AdminOrderSummary,
@@ -93,13 +94,13 @@ export async function getDashboardData(): Promise<AdminDashboardData> {
     db.order.count({ where: { createdAt: { gte: week } } }),
     db.order.count({ where: { createdAt: { gte: month } } }),
     db.order.count({ where: { status: "NEW" } }),
-    db.product.findMany({ where: { archivedAt: null, status: { not: "ARCHIVED" } }, select: { id: true, sku: true, nameAr: true, nameEn: true, stockQuantity: true, lowStockThreshold: true, status: true, variants: { where: { isAvailable: true }, select: { id: true, sku: true, labelAr: true, labelEn: true, stockQuantity: true, isAvailable: true } } } }),
+    db.product.findMany({ where: { archivedAt: null, status: { not: "ARCHIVED" } }, select: { id: true, sku: true, nameAr: true, nameEn: true, stockQuantity: true, lowStockThreshold: true, status: true, isAvailable: true, variants: { where: { isActive: true }, select: { id: true, sku: true, labelAr: true, labelEn: true, stockQuantity: true, isActive: true, isAvailable: true } } } }),
     db.order.findMany({ orderBy: { createdAt: "desc" }, take: 8, select: { id: true, orderNumber: true, customerName: true, customerEmail: true, customerPhone: true, status: true, paymentStatus: true, fulfillmentMethod: true, currency: true, total: true, createdAt: true } }),
     db.order.groupBy({ by: ["status"], _count: { _all: true } }),
     db.order.findMany({ where: { createdAt: { gte: chartStart }, status: { in: [...fulfilledStatuses] } }, select: { createdAt: true, total: true } }),
   ]);
 
-  const stockRows = stockProducts.flatMap<AdminInventoryRow>((product) => product.variants.length ? product.variants.map<AdminInventoryRow>((variant) => ({ id: `variant:${variant.id}`, productId: product.id, variantId: variant.id, sku: variant.sku, nameAr: product.nameAr, nameEn: product.nameEn, variantAr: variant.labelAr, variantEn: variant.labelEn, stock: variant.stockQuantity, lowStockThreshold: product.lowStockThreshold, active: product.status === "ACTIVE" && variant.isAvailable })) : [{ id: `product:${product.id}`, productId: product.id, variantId: null, sku: product.sku, nameAr: product.nameAr, nameEn: product.nameEn, variantAr: null, variantEn: null, stock: product.stockQuantity, lowStockThreshold: product.lowStockThreshold, active: product.status === "ACTIVE" }]);
+  const stockRows = stockProducts.flatMap<AdminInventoryRow>((product) => product.variants.length ? product.variants.map<AdminInventoryRow>((variant) => ({ id: `variant:${variant.id}`, productId: product.id, variantId: variant.id, sku: variant.sku, nameAr: product.nameAr, nameEn: product.nameEn, variantAr: variant.labelAr, variantEn: variant.labelEn, stock: variant.stockQuantity, lowStockThreshold: product.lowStockThreshold, active: product.status === "ACTIVE" && product.isAvailable && variant.isActive && variant.isAvailable })) : [{ id: `product:${product.id}`, productId: product.id, variantId: null, sku: product.sku, nameAr: product.nameAr, nameEn: product.nameEn, variantAr: null, variantEn: null, stock: product.stockQuantity, lowStockThreshold: product.lowStockThreshold, active: product.status === "ACTIVE" && product.isAvailable }]);
   const outOfStock = stockRows.filter((row) => row.stock <= 0);
   const lowStock = stockRows.filter((row) => row.stock > 0 && row.stock <= row.lowStockThreshold);
   const stockAlerts = [...outOfStock, ...lowStock].slice(0, 10);
@@ -137,23 +138,32 @@ export async function getDashboardData(): Promise<AdminDashboardData> {
   };
 }
 
-export async function listProducts(input: { page?: number; search?: string; status?: string; categoryId?: string }): Promise<Paginated<AdminProductSummary>> {
+export async function listProducts(input: { page?: number; search?: string; status?: string; categoryId?: string; availability?: string; stockState?: string }): Promise<Paginated<AdminProductSummary>> {
   const page = normalizedPage(input.page);
   const pageSize = 20;
   const search = input.search?.trim();
   const status = input.status && ["ALL", "DRAFT", "ACTIVE", "HIDDEN", "ARCHIVED"].includes(input.status) ? input.status : "ALL";
+  const availability = input.availability && ["ALL", "AVAILABLE", "UNAVAILABLE"].includes(input.availability) ? input.availability : "ALL";
+  const stockState = input.stockState && ["ALL", "LOW", "OUT"].includes(input.stockState) ? input.stockState : "ALL";
   const where: Prisma.ProductWhereInput = {
     ...(status === "ARCHIVED" ? { archivedAt: { not: null } } : { archivedAt: null }),
     ...(status !== "ALL" && status !== "ARCHIVED" ? { status: status as Prisma.EnumProductStatusFilter } : {}),
     ...(input.categoryId ? { categoryId: input.categoryId } : {}),
+    ...(availability === "AVAILABLE" ? { isAvailable: true } : availability === "UNAVAILABLE" ? { isAvailable: false } : {}),
+    ...(stockState === "OUT" ? { OR: [{ variants: { some: {}, every: { stockQuantity: { lte: 0 } } } }, { variants: { none: {} }, stockQuantity: { lte: 0 } }] } : {}),
     ...(search ? { OR: [{ sku: { contains: search, mode: "insensitive" } }, { nameAr: { contains: search, mode: "insensitive" } }, { nameEn: { contains: search, mode: "insensitive" } }, { slug: { contains: search, mode: "insensitive" } }] } : {}),
   };
-  const [items, total] = await Promise.all([
-    db.product.findMany({ where, orderBy: { updatedAt: "desc" }, skip: (page - 1) * pageSize, take: pageSize, include: { category: { select: { nameAr: true, nameEn: true } }, images: { where: { isPrimary: true }, take: 1, select: { url: true } }, variants: { where: { isAvailable: true }, select: { stockQuantity: true } } } }),
+  const postFilterStock = stockState === "LOW";
+  const [rows, databaseTotal] = await Promise.all([
+    db.product.findMany({ where, orderBy: { updatedAt: "desc" }, ...(postFilterStock ? {} : { skip: (page - 1) * pageSize, take: pageSize }), include: { category: { select: { nameAr: true, nameEn: true } }, images: { where: { isPrimary: true }, take: 1, select: { url: true } }, variants: { select: { stockQuantity: true } } } }),
     db.product.count({ where }),
   ]);
+  const mapped = rows
+    .map((product) => ({ id: product.id, sku: product.sku, slug: product.slug, nameAr: product.nameAr, nameEn: product.nameEn, price: safeNumber(product.price), stock: product.variants.length ? product.variants.reduce((sum, variant) => sum + variant.stockQuantity, 0) : product.stockQuantity, lowStockThreshold: product.lowStockThreshold, status: product.status, available: product.isAvailable, active: product.status === "ACTIVE", featured: product.isFeatured, variationCount: product.variants.length, archivedAt: product.archivedAt?.toISOString() ?? null, categoryNameAr: product.category.nameAr, categoryNameEn: product.category.nameEn, primaryImageUrl: product.images[0]?.url ?? null, updatedAt: product.updatedAt.toISOString() }))
+    .filter((product) => !postFilterStock || (product.stock > 0 && product.stock <= product.lowStockThreshold));
+  const total = postFilterStock ? mapped.length : databaseTotal;
   return {
-    items: items.map((product) => ({ id: product.id, sku: product.sku, slug: product.slug, nameAr: product.nameAr, nameEn: product.nameEn, price: safeNumber(product.price), stock: product.variants.length ? product.variants.reduce((sum, variant) => sum + variant.stockQuantity, 0) : product.stockQuantity, lowStockThreshold: product.lowStockThreshold, active: product.status === "ACTIVE", featured: product.isFeatured, archivedAt: product.archivedAt?.toISOString() ?? null, categoryNameAr: product.category.nameAr, categoryNameEn: product.category.nameEn, primaryImageUrl: product.images[0]?.url ?? null, updatedAt: product.updatedAt.toISOString() })),
+    items: postFilterStock ? mapped.slice((page - 1) * pageSize, page * pageSize) : mapped,
     page,
     pageSize,
     total,
@@ -175,8 +185,11 @@ export async function getProduct(id: string): Promise<AdminProductDetail | null>
     price: safeNumber(product.price),
     stock: product.stockQuantity,
     lowStockThreshold: product.lowStockThreshold,
+    status: product.status,
+    available: product.isAvailable,
     active: product.status === "ACTIVE",
     featured: product.isFeatured,
+    variationCount: product.variants.length,
     archivedAt: product.archivedAt?.toISOString() ?? null,
     categoryId: product.categoryId,
     categoryNameAr: product.category.nameAr,
@@ -184,7 +197,7 @@ export async function getProduct(id: string): Promise<AdminProductDetail | null>
     primaryImageUrl: product.images.find((image) => image.isPrimary)?.url ?? product.images[0]?.url ?? null,
     updatedAt: product.updatedAt.toISOString(),
     images: product.images.map((image) => ({ id: image.id, storageKey: image.storageKey, url: image.url, altAr: image.altAr ?? "", altEn: image.altEn ?? "", position: image.displayOrder, primary: image.isPrimary, mimeType: image.mimeType as AdminProductDetail["images"][number]["mimeType"], sizeBytes: image.sizeBytes })),
-    variants: product.variants.map((variant) => ({ id: variant.id, sku: variant.sku, labelAr: variant.labelAr, labelEn: variant.labelEn, priceOverride: variant.priceOverride === null ? null : safeNumber(variant.priceOverride), stock: variant.stockQuantity, active: variant.isAvailable })),
+    variants: product.variants.map((variant) => ({ id: variant.id, sku: variant.sku, labelAr: variant.labelAr, labelEn: variant.labelEn, priceOverride: variant.priceOverride === null ? null : safeNumber(variant.priceOverride), stock: variant.stockQuantity, available: variant.isAvailable, active: variant.isActive })),
   };
 }
 
@@ -196,9 +209,37 @@ export async function listCategories(includeArchived = false): Promise<AdminCate
 export async function listInventory(search?: string): Promise<AdminInventoryRow[]> {
   const products = await db.product.findMany({ where: { archivedAt: null, ...(search?.trim() ? { OR: [{ sku: { contains: search.trim(), mode: "insensitive" } }, { nameAr: { contains: search.trim(), mode: "insensitive" } }, { nameEn: { contains: search.trim(), mode: "insensitive" } }, { variants: { some: { sku: { contains: search.trim(), mode: "insensitive" } } } }] } : {}) }, orderBy: { nameEn: "asc" }, include: { variants: { orderBy: { displayOrder: "asc" } } } });
   return products.flatMap<AdminInventoryRow>((product) => {
-    if (product.variants.length > 0) return product.variants.map<AdminInventoryRow>((variant) => ({ id: `variant:${variant.id}`, productId: product.id, variantId: variant.id, sku: variant.sku, nameAr: product.nameAr, nameEn: product.nameEn, variantAr: variant.labelAr, variantEn: variant.labelEn, stock: variant.stockQuantity, lowStockThreshold: product.lowStockThreshold, active: product.status === "ACTIVE" && variant.isAvailable }));
-    return [{ id: `product:${product.id}`, productId: product.id, variantId: null, sku: product.sku, nameAr: product.nameAr, nameEn: product.nameEn, variantAr: null, variantEn: null, stock: product.stockQuantity, lowStockThreshold: product.lowStockThreshold, active: product.status === "ACTIVE" } satisfies AdminInventoryRow];
+    if (product.variants.length > 0) return product.variants.map<AdminInventoryRow>((variant) => ({ id: `variant:${variant.id}`, productId: product.id, variantId: variant.id, sku: variant.sku, nameAr: product.nameAr, nameEn: product.nameEn, variantAr: variant.labelAr, variantEn: variant.labelEn, stock: variant.stockQuantity, lowStockThreshold: product.lowStockThreshold, active: product.status === "ACTIVE" && product.isAvailable && variant.isActive && variant.isAvailable }));
+    return [{ id: `product:${product.id}`, productId: product.id, variantId: null, sku: product.sku, nameAr: product.nameAr, nameEn: product.nameEn, variantAr: null, variantEn: null, stock: product.stockQuantity, lowStockThreshold: product.lowStockThreshold, active: product.status === "ACTIVE" && product.isAvailable } satisfies AdminInventoryRow];
   });
+}
+
+export async function listInventoryAdjustments(limit = 100): Promise<AdminInventoryAdjustment[]> {
+  const rows = await db.inventoryAdjustment.findMany({
+    orderBy: { createdAt: "desc" },
+    take: Math.min(250, Math.max(1, limit)),
+    include: {
+      product: { select: { nameAr: true, nameEn: true, sku: true } },
+      variant: { select: { labelAr: true, labelEn: true, sku: true } },
+      createdBy: { select: { name: true, email: true } },
+    },
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    productId: row.productId,
+    variantId: row.variantId,
+    productNameAr: row.product.nameAr,
+    productNameEn: row.product.nameEn,
+    sku: row.variant?.sku ?? row.product.sku,
+    variantAr: row.variant?.labelAr ?? null,
+    variantEn: row.variant?.labelEn ?? null,
+    previousStock: row.previousStock,
+    quantityDelta: row.quantityDelta,
+    newStock: row.newStock,
+    reason: row.reason,
+    admin: row.createdBy?.name || row.createdBy?.email || "System",
+    createdAt: row.createdAt.toISOString(),
+  }));
 }
 
 export async function listOrders(input: { page?: number; search?: string; status?: string; paymentStatus?: string; fulfillment?: string; from?: string; to?: string }): Promise<Paginated<AdminOrderSummary>> {

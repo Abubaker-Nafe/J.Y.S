@@ -2,20 +2,28 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { House, LoaderCircle, LogOut, MapPinned, PackageSearch, UserRound } from "lucide-react";
+import { House, LayoutDashboard, LoaderCircle, LogOut, MapPinned, PackageSearch, RefreshCw, UserRound } from "lucide-react";
 import type { Locale } from "@/lib/i18n/config";
 import { translate } from "@/lib/i18n/dictionaries";
 import { buttonStyles } from "@/components/ui/button";
 import { useStore } from "./store-provider";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 export function AccountShell({ locale, children }: { locale: Locale; children: ReactNode }) {
-  const pathname = usePathname(); const router = useRouter(); const { user, sessionReady, clearCustomerSession } = useStore(); const t = (key: string) => translate(locale, key);
+  const pathname = usePathname(); const router = useRouter(); const { user, sessionReady, sessionStatus, sessionError, clearCustomerSession, refreshSession } = useStore(); const t = (key: string) => translate(locale, key);
+  const loginHref = `/${locale}/login?next=${encodeURIComponent(pathname)}`;
   async function logout() { try { await fetch("/api/auth/logout", { method: "POST" }); } finally { clearCustomerSession(); router.push(`/${locale}`); router.refresh(); } }
+  useEffect(() => {
+    if (sessionStatus === "unauthenticated") router.replace(loginHref);
+  }, [loginHref, router, sessionStatus]);
   if (!sessionReady) return <div className="container-shell grid min-h-[28rem] place-items-center" role="status" aria-live="polite"><LoaderCircle className="size-8 animate-spin text-accent" aria-hidden="true" /><span className="sr-only">{t("common.loading")}</span></div>;
-  if (!user) return <div className="container-shell py-20"><div className="mx-auto max-w-xl rounded-3xl border border-line bg-surface p-10 text-center"><UserRound className="mx-auto size-10 text-accent" /><h1 className="mt-5 font-display text-3xl font-semibold">{t("checkout.signin")}</h1><p className="mt-3 text-muted">{t("auth.loginText")}</p><Link href={`/${locale}/login?next=${encodeURIComponent(pathname)}`} className={buttonStyles({ className: "mt-6" })}>{t("auth.login")}</Link></div></div>;
+  if (sessionStatus === "error") return <div className="container-shell py-20"><div role="alert" className="mx-auto max-w-xl rounded-3xl border border-red-200 bg-red-50 p-10 text-center"><UserRound className="mx-auto size-10 text-red-700" /><h1 className="mt-5 font-display text-3xl font-semibold">{locale === "ar" ? "تعذر التحقق من الجلسة" : "We couldn’t verify your session"}</h1><p className="mt-3 text-red-900/75">{sessionError === "timeout" ? (locale === "ar" ? "استغرق اتصال الحساب وقتاً طويلاً. تحقق من الخادم وحاول مجدداً." : "The account request timed out. Check the server and try again.") : (locale === "ar" ? "خدمة الحساب غير متاحة حالياً. لم يتم تسجيل خروجك تلقائياً." : "The account service is currently unavailable. You were not treated as signed out.")}</p><button type="button" onClick={() => void refreshSession()} className={buttonStyles({ className: "mt-6" })}><RefreshCw className="size-4" />{t("common.retry")}</button></div></div>;
+  if (!user) return <div className="container-shell grid min-h-[28rem] place-items-center" role="status" aria-live="polite"><LoaderCircle className="size-8 animate-spin text-accent" aria-hidden="true" /><span className="sr-only">{locale === "ar" ? "جارٍ التحويل إلى تسجيل الدخول" : "Redirecting to sign in"}</span></div>;
   const links = [
+    ...(user.role === "ADMIN"
+      ? [{ href: `/${locale}/admin`, label: locale === "ar" ? "لوحة الإدارة" : "Admin dashboard", Icon: LayoutDashboard, exact: false }]
+      : []),
     { href: `/${locale}/profile`, label: t("account.overview"), Icon: UserRound, exact: true },
     { href: `/${locale}/profile/addresses`, label: t("account.addresses"), Icon: MapPinned, exact: false },
     { href: `/${locale}/profile/orders`, label: t("account.orders"), Icon: PackageSearch, exact: false },

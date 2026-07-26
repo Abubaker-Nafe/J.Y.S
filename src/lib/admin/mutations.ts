@@ -3,6 +3,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { createManualInventoryAdjustment, transitionOrderStatus } from "@/lib/domain/order-service";
+import { assertPaymentStatusTransition, type DomainPaymentStatus } from "@/lib/domain/payment";
 import { AdminDomainError } from "./api";
 import { areaMoveConflictsWithAddresses } from "./location-rules";
 import type {
@@ -31,6 +32,7 @@ function productMetadataData(input: ProductMutation) {
     lowStockThreshold: input.lowStockThreshold,
     categoryId: input.categoryId,
     status: input.active ? "ACTIVE" as const : "HIDDEN" as const,
+    isAvailable: input.available,
     isFeatured: input.featured,
   };
 }
@@ -53,7 +55,15 @@ function imageData(image: ProductMutation["images"][number]) {
 }
 
 function variantMetadataData(variant: ProductMutation["variants"][number], displayOrder: number) {
-  return { sku: variant.sku, labelAr: variant.labelAr, labelEn: variant.labelEn, priceOverride: variant.priceOverride, isAvailable: variant.active, displayOrder };
+  return {
+    sku: variant.sku,
+    labelAr: variant.labelAr,
+    labelEn: variant.labelEn,
+    priceOverride: variant.priceOverride,
+    isActive: variant.active,
+    isAvailable: variant.available,
+    displayOrder,
+  };
 }
 
 function variantData(variant: ProductMutation["variants"][number], displayOrder: number) {
@@ -73,8 +83,8 @@ export async function createProduct(input: ProductMutation, actorId: string) {
       select: { id: true, variants: { select: { id: true, stockQuantity: true } } },
     });
     const initialAdjustments = [
-      ...(input.stock > 0 ? [{ productId: product.id, variantId: null, type: "INITIAL_STOCK" as const, quantityDelta: input.stock, reason: "Initial product stock", createdById: actorId }] : []),
-      ...product.variants.filter((variant) => variant.stockQuantity > 0).map((variant) => ({ productId: product.id, variantId: variant.id, type: "INITIAL_STOCK" as const, quantityDelta: variant.stockQuantity, reason: "Initial variant stock", createdById: actorId })),
+      ...(input.stock > 0 ? [{ productId: product.id, variantId: null, type: "INITIAL_STOCK" as const, quantityDelta: input.stock, previousStock: 0, newStock: input.stock, reason: "Initial product stock", createdById: actorId }] : []),
+      ...product.variants.filter((variant) => variant.stockQuantity > 0).map((variant) => ({ productId: product.id, variantId: variant.id, type: "INITIAL_STOCK" as const, quantityDelta: variant.stockQuantity, previousStock: 0, newStock: variant.stockQuantity, reason: "Initial variant stock", createdById: actorId })),
     ];
     if (initialAdjustments.length) await tx.inventoryAdjustment.createMany({ data: initialAdjustments });
     await audit(tx, actorId, "PRODUCT_CREATED", "Product", product.id, { sku: input.sku });
@@ -91,7 +101,7 @@ export async function updateProduct(id: string, input: ProductMutation, actorId:
     await tx.productImage.deleteMany({ where: { productId: id } });
     await tx.productVariant.updateMany({
       where: { productId: id, id: { notIn: requestedVariantIds } },
-      data: { isAvailable: false, displayOrder: input.variants.length + 100 },
+      data: { isActive: false, isAvailable: false, displayOrder: input.variants.length + 100 },
     });
     for (const [index, variant] of input.variants.entries()) {
       if (variant.id) {
@@ -102,7 +112,7 @@ export async function updateProduct(id: string, input: ProductMutation, actorId:
         if (updated.count !== 1) throw new AdminDomainError("A product variant no longer exists. Reload and try again.", 409);
       } else {
         const created = await tx.productVariant.create({ data: { productId: id, ...variantData(variant, index) }, select: { id: true } });
-        if (variant.stock > 0) await tx.inventoryAdjustment.create({ data: { productId: id, variantId: created.id, type: "INITIAL_STOCK", quantityDelta: variant.stock, reason: "Initial stock for newly created variant", createdById: actorId } });
+        if (variant.stock > 0) await tx.inventoryAdjustment.create({ data: { productId: id, variantId: created.id, type: "INITIAL_STOCK", quantityDelta: variant.stock, previousStock: 0, newStock: variant.stock, reason: "Initial stock for newly created variant", createdById: actorId } });
       }
     }
     const product = await tx.product.update({ where: { id }, data: { ...productMetadataData(input), images: { create: input.images.map(imageData) } }, select: { id: true } });
@@ -153,7 +163,22 @@ export async function restoreCategory(id: string, actorId: string) {
 
 export async function adjustInventory(input: InventoryAdjustmentMutation, actorId: string) {
   const adjustment = await createManualInventoryAdjustment({ ...input, actorId });
-  await db.auditLog.create({ data: { actorId, action: "INVENTORY_ADJUSTED", entityType: "InventoryAdjustment", entityId: adjustment.id, metadata: { productId: input.productId, variantId: input.variantId ?? null, quantityDelta: input.quantityDelta } } });
+  await db.auditLog.create({
+    data: {
+      actorId,
+      action: "INVENTORY_ADJUSTED",
+      entityType: "InventoryAdjustment",
+      entityId: adjustment.id,
+      metadata: {
+        productId: input.productId,
+        variantId: input.variantId ?? null,
+        mode: input.mode,
+        previousStock: adjustment.previousStock,
+        quantityDelta: adjustment.quantityDelta,
+        newStock: adjustment.newStock,
+      },
+    },
+  });
   return adjustment;
 }
 
@@ -161,6 +186,11 @@ export async function updateOrder(id: string, input: OrderMutation, actorId: str
   const order = await db.order.findUnique({ where: { id }, select: { id: true, status: true, paymentStatus: true } });
   if (!order) throw new AdminDomainError("Order not found.", 404);
   if (input.paymentStatus) {
+    try {
+      assertPaymentStatusTransition(order.paymentStatus as DomainPaymentStatus, input.paymentStatus);
+    } catch (error) {
+      throw new AdminDomainError(error instanceof Error ? error.message : "Invalid payment status transition.", 422);
+    }
     return db.$transaction(async (tx) => {
       const changed = await tx.order.updateMany({ where: { id, paymentStatus: order.paymentStatus }, data: { paymentStatus: input.paymentStatus } });
       if (changed.count !== 1) throw new AdminDomainError("This order changed while you were editing it. Reload and try again.", 409);

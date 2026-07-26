@@ -8,7 +8,8 @@ This file is the authoritative checklist for configuring JYS after cloning and b
 2. Set a reachable PostgreSQL `DATABASE_URL`.
 3. Generate and set a unique `AUTH_SECRET`.
 4. Confirm `APP_URL` and `NEXT_PUBLIC_APP_URL` are `http://localhost:3000`.
-5. Generate Prisma Client, run the migration, and seed the development database.
+5. If using a hosts-file alias, add its hostname to `DEV_ALLOWED_ORIGINS`.
+6. Generate Prisma Client, run the migration, and seed the development database.
 
 The marketing/catalog shell can build without contacting PostgreSQL, but registration, login, persistent carts/wishlists, checkout, orders, admin operations, and database reports require these items.
 
@@ -43,6 +44,7 @@ Real credentials belong in `.env` locally or encrypted deployment settings in pr
 Run from the repository root:
 
 ```powershell
+npm.cmd install
 npx.cmd prisma validate
 npx.cmd prisma generate
 npx.cmd prisma migrate dev
@@ -56,6 +58,8 @@ npx.cmd prisma studio
 - Generate Prisma Client: `npx.cmd prisma generate`
 - Seed development: `npm.cmd run db:seed`
 - Inspect data locally: `npx.cmd prisma studio` (do not expose Studio publicly)
+
+Final local verification on 2026-07-26 used PostgreSQL database `JYS_DB` at `localhost:5432`: the migrated database completed the customer, stale-cart, concurrent-stock, inventory, reports, export, and admin browser suites. The inventory/availability migration is `prisma/migrations/20260724000100_product_availability_inventory_audit/migration.sql`; deploy it with `npx.cmd prisma migrate deploy` outside local schema-development work.
 
 The development seed is deterministic on an empty database and conservative on repeat runs. Existing product/variant stock and availability, product lifecycle state, seeded orders (including payment and fulfillment status), and inventory-ledger entries are preserved. Use the admin inventory and order workflows for operational changes; do not rerun the seed expecting it to reset a used database.
 
@@ -90,7 +94,25 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 - Callback/reset URL: the reset page is `${APP_URL}/en/reset-password` or `${APP_URL}/ar/reset-password`; update the base URL after deployment.
 - Production action: HTTPS is mandatory; do not leave either variable pointing to localhost.
 
-Authentication cookies are HttpOnly, same-site, and secure in production. If the application is behind a trusted reverse proxy, set `TRUST_PROXY="true"` only after the proxy is correctly stripping untrusted forwarded headers.
+In development, browser API calls use relative same-origin paths. Password-reset links use the origin of the local request, so a reset requested from `http://jys.com:3000` stays on that hostname even while the configured canonical local URL remains `http://localhost:3000`. Production always uses the configured `APP_URL`.
+
+### Optional Windows local-domain alias
+
+- Windows hosts file: `C:\Windows\System32\drivers\etc\hosts`
+- Hosts entry: `127.0.0.1 jys.com`
+- File: `.env`
+- Variable: `DEV_ALLOWED_ORIGINS`
+- Exact local value: `DEV_ALLOWED_ORIGINS="jys.com"`
+- Multiple aliases: comma-separated hostnames, for example `DEV_ALLOWED_ORIGINS="jys.com,shop.test"`
+- Format restriction: hostnames only; do not include `http://`, a port, a path, or a production origin.
+- Required action after changing it: stop and restart `npm.cmd run dev`; `next.config.ts` is read at server startup.
+- English test URL: `http://jys.com:3000/en/profile`
+- Arabic test URL: `http://jys.com:3000/ar/profile`
+- Automated verification: `npm.cmd run test:e2e:hosts`
+
+`localhost` and `jys.com` are different cookie hosts. The `jys_session` cookie deliberately has no `Domain` attribute, uses `Path=/`, `SameSite=Lax`, and `HttpOnly`, and adds `Secure` in production. Logging in on one local hostname therefore does not log in on the other; authenticate separately when comparing them.
+
+Authentication cookies are HttpOnly, same-site, and secure in production. Keep `TRUST_PROXY="false"` for direct local development. Set it to `true` only behind a trusted reverse proxy that strips untrusted forwarded headers.
 
 ## Administrator account
 
@@ -264,12 +286,22 @@ No payment gateway, delivery-company API, analytics tracker, WhatsApp integratio
 After configuration, run:
 
 ```powershell
+npm.cmd install
+npx.cmd prisma validate
+npx.cmd prisma generate
 npx.cmd prisma migrate status
+npm.cmd run db:seed
 npm.cmd run lint
 npm.cmd run typecheck
 npm.cmd test
+npm.cmd run test:e2e
+npm.cmd run test:e2e:db
+npm.cmd run test:e2e:hosts
 npm.cmd run build
+npm.cmd audit --audit-level=high
 npm.cmd run dev
 ```
 
-Then verify both `/en` and `/ar`, registration/login, cart stock limits, wishlist persistence, delivery and pickup checkout, ownership-protected order detail, admin denial for customers, product creation, inventory correction, order confirmation/cancellation stock behavior, policy editing, reports, CSV export, mobile navigation, keyboard focus, and print order output.
+`npm.cmd run test:e2e` uses the database-independent demo catalog for desktop/mobile storefront coverage. `npm.cmd run test:e2e:db` requires a migrated, seeded disposable/local PostgreSQL database and runs the serial customer/admin mutation journey plus mobile admin reachability.
+
+Then verify both `/en` and `/ar`, `/en/categories` and `/ar/categories`, registration/login, cart stock limits and focus refresh, wishlist persistence/out-of-stock state, delivery and pickup checkout, ownership-protected order detail, admin denial for customers, product creation, inventory correction, concurrent/idempotent order stock behavior, policy editing, reports, CSV download cleanup, mobile navigation, keyboard focus, and print order output.
