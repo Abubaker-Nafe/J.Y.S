@@ -11,6 +11,8 @@ describe("catalog URL query", () => {
       sort: "high",
     });
     expect(normalizeCatalogSort("price-asc")).toBe("low");
+    expect(normalizeCatalogSort("discount")).toBe("discount");
+    expect(normalizeCatalogSort("sale-newest")).toBe("sale-newest");
   });
 
   it("uses safe defaults and supports escaping a category route filter", () => {

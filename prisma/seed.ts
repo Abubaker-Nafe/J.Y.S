@@ -4,6 +4,7 @@ import {
   DEFAULT_SEED_CREDENTIALS,
   assertSafeSeedCredentials,
 } from "./seed-policy";
+import { salePriceFromPercentage } from "../src/lib/domain/pricing";
 
 const prisma = new PrismaClient();
 
@@ -12,36 +13,36 @@ const CUSTOMER_ID = "seed_user_customer";
 
 async function seedLocations() {
   const cities = [
-    ["city_ramallah", "ramallah", "رام الله والبيرة", "Ramallah & Al-Bireh", "20.00"],
-    ["city_jerusalem", "jerusalem", "القدس", "Jerusalem", "25.00"],
-    ["city_nablus", "nablus", "نابلس", "Nablus", "25.00"],
-    ["city_hebron", "hebron", "الخليل", "Hebron", "25.00"],
-    ["city_bethlehem", "bethlehem", "بيت لحم", "Bethlehem", "25.00"],
-    ["city_jenin", "jenin", "جنين", "Jenin", "30.00"],
+    ["city_ramallah", "ramallah", "رام الله والبيرة", "Ramallah & Al-Bireh"],
+    ["city_jerusalem", "jerusalem", "القدس", "Jerusalem"],
+    ["city_nablus", "nablus", "نابلس", "Nablus"],
+    ["city_hebron", "hebron", "الخليل", "Hebron"],
+    ["city_bethlehem", "bethlehem", "بيت لحم", "Bethlehem"],
+    ["city_jenin", "jenin", "جنين", "Jenin"],
   ] as const;
-  for (const [id, slug, nameAr, nameEn, deliveryFee] of cities) {
+  for (const [id, slug, nameAr, nameEn] of cities) {
     await prisma.city.upsert({
       where: { id },
-      create: { id, slug, nameAr, nameEn, deliveryFee, displayOrder: cities.findIndex((c) => c[0] === id) },
-      update: {},
+      create: { id, slug, nameAr, nameEn, displayOrder: cities.findIndex((c) => c[0] === id) },
+      update: { deliveryFee: 0 },
     });
   }
 
   const areas = [
-    ["area_ramallah_centre", "city_ramallah", "centre", "وسط البلد", "City Centre", "15.00"],
-    ["area_albireh", "city_ramallah", "al-bireh", "البيرة", "Al-Bireh", "15.00"],
-    ["area_birzeit", "city_ramallah", "birzeit", "بيرزيت", "Birzeit", "20.00"],
-    ["area_jerusalem_centre", "city_jerusalem", "centre", "وسط القدس", "Jerusalem Centre", null],
-    ["area_nablus_centre", "city_nablus", "centre", "وسط نابلس", "Nablus Centre", "20.00"],
-    ["area_rafidia", "city_nablus", "rafidia", "رفيديا", "Rafidia", "20.00"],
-    ["area_hebron_centre", "city_hebron", "centre", "وسط الخليل", "Hebron Centre", "20.00"],
-    ["area_bethlehem_centre", "city_bethlehem", "centre", "وسط بيت لحم", "Bethlehem Centre", "20.00"],
+    ["area_ramallah_centre", "city_ramallah", "centre", "وسط البلد", "City Centre"],
+    ["area_albireh", "city_ramallah", "al-bireh", "البيرة", "Al-Bireh"],
+    ["area_birzeit", "city_ramallah", "birzeit", "بيرزيت", "Birzeit"],
+    ["area_jerusalem_centre", "city_jerusalem", "centre", "وسط القدس", "Jerusalem Centre"],
+    ["area_nablus_centre", "city_nablus", "centre", "وسط نابلس", "Nablus Centre"],
+    ["area_rafidia", "city_nablus", "rafidia", "رفيديا", "Rafidia"],
+    ["area_hebron_centre", "city_hebron", "centre", "وسط الخليل", "Hebron Centre"],
+    ["area_bethlehem_centre", "city_bethlehem", "centre", "وسط بيت لحم", "Bethlehem Centre"],
   ] as const;
-  for (const [id, cityId, slug, nameAr, nameEn, deliveryFee] of areas) {
+  for (const [id, cityId, slug, nameAr, nameEn] of areas) {
     await prisma.area.upsert({
       where: { id },
-      create: { id, cityId, slug, nameAr, nameEn, deliveryFee, displayOrder: areas.findIndex((a) => a[0] === id) },
-      update: {},
+      create: { id, cityId, slug, nameAr, nameEn, displayOrder: areas.findIndex((a) => a[0] === id) },
+      update: { deliveryFee: null },
     });
   }
 }
@@ -154,13 +155,14 @@ async function seedCatalog() {
   type SeedProduct = {
     id: string;
     categoryId: string;
-    slug: string;
     sku: string;
     nameAr: string;
     nameEn: string;
     descriptionAr: string;
     descriptionEn: string;
     price: string;
+    salePrice?: string;
+    salePercentage?: string;
     stockQuantity: number;
     lowStockThreshold: number;
     isFeatured: boolean;
@@ -171,13 +173,14 @@ async function seedCatalog() {
     {
       id: "product_precision_clipper",
       categoryId: "category_clippers",
-      slug: "precision-pro-clipper",
       sku: "JYS-CLP-001",
       nameAr: "ماكينة حلاقة برو الدقيقة",
       nameEn: "Precision Pro Clipper",
       descriptionAr: "ماكينة حلاقة قوية للاستخدام اليومي مع شفرات دقيقة وملحقات متعددة.",
       descriptionEn: "A dependable daily-use clipper with precision blades and multiple guides.",
       price: "189.00",
+      salePrice: "151.20",
+      salePercentage: "20",
       stockQuantity: 0,
       lowStockThreshold: 4,
       isFeatured: true,
@@ -190,13 +193,14 @@ async function seedCatalog() {
     {
       id: "product_styling_clay",
       categoryId: "category_styling",
-      slug: "matte-styling-clay",
       sku: "JYS-STY-001",
       nameAr: "طين تصفيف مطفي",
       nameEn: "Matte Styling Clay",
       descriptionAr: "ثبات مرن ولمسة مطفية دون مظهر دهني، مناسب للاستخدام اليومي.",
       descriptionEn: "Flexible hold and a natural matte finish without greasy residue.",
       price: "39.00",
+      salePrice: "33.15",
+      salePercentage: "15",
       stockQuantity: 36,
       lowStockThreshold: 8,
       isFeatured: true,
@@ -206,13 +210,14 @@ async function seedCatalog() {
     {
       id: "product_beard_oil",
       categoryId: "category_beard",
-      slug: "nourishing-beard-oil",
       sku: "JYS-BRD-001",
       nameAr: "زيت مغذٍ للحية",
       nameEn: "Nourishing Beard Oil",
       descriptionAr: "زيت خفيف لترطيب اللحية والبشرة ومنحها مظهراً مرتباً.",
       descriptionEn: "Lightweight oil that softens facial hair and hydrates the skin beneath.",
       price: "49.00",
+      salePrice: "41.65",
+      salePercentage: "15",
       stockQuantity: 0,
       lowStockThreshold: 6,
       isFeatured: true,
@@ -225,13 +230,14 @@ async function seedCatalog() {
     {
       id: "product_shaving_set",
       categoryId: "category_shaving",
-      slug: "complete-shaving-set",
       sku: "JYS-SHV-001",
       nameAr: "طقم حلاقة متكامل",
       nameEn: "Complete Shaving Set",
       descriptionAr: "مجموعة عملية تتضمن فرشاة ووعاء حلاقة وحامل مرتب.",
       descriptionEn: "A practical set with a shaving brush, bowl, and tidy stand.",
       price: "89.00",
+      salePrice: "75.65",
+      salePercentage: "15",
       stockQuantity: 12,
       lowStockThreshold: 4,
       isFeatured: true,
@@ -241,7 +247,6 @@ async function seedCatalog() {
     {
       id: "product_carbon_comb",
       categoryId: "category_accessories",
-      slug: "carbon-cutting-comb",
       sku: "JYS-ACC-001",
       nameAr: "مشط قص كربوني",
       nameEn: "Carbon Cutting Comb",
@@ -257,7 +262,6 @@ async function seedCatalog() {
     {
       id: "product_razor_pack",
       categoryId: "category_shaving",
-      slug: "professional-razor-blades",
       sku: "JYS-SHV-002",
       nameAr: "شفرات حلاقة احترافية",
       nameEn: "Professional Razor Blades",
@@ -276,18 +280,20 @@ async function seedCatalog() {
   ];
 
   for (const product of products) {
-    await prisma.product.upsert({
+    const storedProduct = await prisma.product.upsert({
       where: { id: product.id },
       create: {
         id: product.id,
         categoryId: product.categoryId,
-        slug: product.slug,
         sku: product.sku,
         nameAr: product.nameAr,
         nameEn: product.nameEn,
         descriptionAr: product.descriptionAr,
         descriptionEn: product.descriptionEn,
         price: product.price,
+        isOnSale: Boolean(product.salePrice),
+        salePrice: product.salePrice ?? null,
+        saleUpdatedAt: product.salePrice ? new Date("2026-08-01T09:00:00.000Z") : null,
         stockQuantity: product.stockQuantity,
         lowStockThreshold: product.lowStockThreshold,
         status: "ACTIVE",
@@ -296,6 +302,13 @@ async function seedCatalog() {
       // Products become business-managed data after first creation.
       update: {},
     });
+    if (product.salePrice) {
+      const currentSalePrice = salePriceFromPercentage(storedProduct.price, product.salePercentage ?? "15");
+      await prisma.product.updateMany({
+        where: { id: product.id, isOnSale: false, saleUpdatedAt: null },
+        data: { isOnSale: true, salePrice: currentSalePrice, saleUpdatedAt: new Date("2026-08-01T09:00:00.000Z") },
+      });
+    }
     await prisma.productImage.upsert({
       where: { storageKey: `seed-${product.id}.png` },
       create: {
@@ -384,8 +397,8 @@ async function seedOrders() {
       paymentStatus: "PAID" as const,
       status: "DELIVERED" as const,
       subtotal: "78.00",
-      deliveryFee: "15.00",
-      total: "93.00",
+      deliveryFee: "0.00",
+      total: "78.00",
       cityId: "city_ramallah",
       areaId: "area_albireh",
       cityNameAr: "رام الله والبيرة",
@@ -396,7 +409,7 @@ async function seedOrders() {
       inventoryDeductedAt: new Date("2026-07-01T11:00:00.000Z"),
       completedAt: new Date("2026-07-03T15:00:00.000Z"),
       createdAt: new Date("2026-07-01T10:00:00.000Z"),
-      item: { productId: "product_styling_clay", sku: "JYS-STY-001", nameAr: "طين تصفيف مطفي", nameEn: "Matte Styling Clay", unitPrice: "39.00", quantity: 2 },
+      item: { productId: "product_styling_clay", sku: "JYS-STY-001", nameAr: "طين تصفيف مطفي", nameEn: "Matte Styling Clay", imageUrl: "/images/products/styling-clay.png", unitPrice: "39.00", quantity: 2 },
     },
     {
       id: "seed_order_pickup",
@@ -418,7 +431,7 @@ async function seedOrders() {
       inventoryDeductedAt: new Date("2026-07-12T13:00:00.000Z"),
       completedAt: null,
       createdAt: new Date("2026-07-12T12:00:00.000Z"),
-      item: { productId: "product_shaving_set", sku: "JYS-SHV-001", nameAr: "طقم حلاقة متكامل", nameEn: "Complete Shaving Set", unitPrice: "89.00", quantity: 1 },
+      item: { productId: "product_shaving_set", sku: "JYS-SHV-001", nameAr: "طقم حلاقة متكامل", nameEn: "Complete Shaving Set", imageUrl: "/images/products/shaving-set.png", unitPrice: "89.00", quantity: 1 },
     },
     {
       id: "seed_order_new",
@@ -428,8 +441,8 @@ async function seedOrders() {
       paymentStatus: "PENDING" as const,
       status: "NEW" as const,
       subtotal: "49.00",
-      deliveryFee: "20.00",
-      total: "69.00",
+      deliveryFee: "0.00",
+      total: "49.00",
       cityId: "city_nablus",
       areaId: "area_rafidia",
       cityNameAr: "نابلس",
@@ -440,7 +453,7 @@ async function seedOrders() {
       inventoryDeductedAt: null,
       completedAt: null,
       createdAt: new Date("2026-07-18T10:00:00.000Z"),
-      item: { productId: "product_beard_oil", variantId: "variant_beard_classic", sku: "JYS-BRD-001-CLS", nameAr: "زيت مغذٍ للحية", nameEn: "Nourishing Beard Oil", labelAr: "رائحة كلاسيكية 30 مل", labelEn: "Classic 30 ml", unitPrice: "49.00", quantity: 1 },
+      item: { productId: "product_beard_oil", variantId: "variant_beard_classic", sku: "JYS-BRD-001-CLS", nameAr: "زيت مغذٍ للحية", nameEn: "Nourishing Beard Oil", labelAr: "رائحة كلاسيكية 30 مل", labelEn: "Classic 30 ml", imageUrl: "/images/products/beard-care.png", unitPrice: "49.00", quantity: 1 },
     },
   ];
 
@@ -487,6 +500,9 @@ async function seedOrders() {
             unitPrice: order.item.unitPrice,
             quantity: order.item.quantity,
             lineTotal: new Prisma.Decimal(order.item.unitPrice).mul(order.item.quantity),
+            imageUrlSnapshot: order.item.imageUrl,
+            imageAltArSnapshot: order.item.nameAr,
+            imageAltEnSnapshot: order.item.nameEn,
           },
         },
         statusHistory: {

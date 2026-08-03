@@ -99,7 +99,7 @@ export function ContentManager({ locale, pages }: { locale: AdminLocale; pages: 
         role="tabpanel"
         aria-labelledby={`content-tab-${selected.key.toLowerCase()}`}
         tabIndex={0}
-        className={styles.form}
+        className={`${styles.form} ${styles.tabPanel}`}
         onSubmit={submit}
         key={selected.key}
       >

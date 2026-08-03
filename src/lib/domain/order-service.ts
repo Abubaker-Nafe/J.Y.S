@@ -6,9 +6,9 @@ import type { CheckoutInput } from "@/lib/validation/commerce";
 import { ValidationError } from "@/lib/validation/common";
 import { getProductAvailability, validateRequestedQuantity } from "./catalog";
 import { currencyFromSetting } from "./currency";
-import { calculateDeliveryFee } from "./delivery";
 import { inventoryActionForTransition } from "./inventory";
 import { calculateOrderTotals, minorToMoney, moneyToMinor } from "./money";
+import { resolveSalePricing } from "./pricing";
 import {
   assertOrderTransition,
   isCompletedStatus,
@@ -72,26 +72,27 @@ export async function createOrderFromCart(userId: string, input: CheckoutInput) 
       if (!cart || cart.items.length === 0) throw new ValidationError("Your cart is empty");
 
       let city:
-        | { id: string; nameAr: string; nameEn: string; deliveryFee: Prisma.Decimal }
+        | { id: string; nameAr: string; nameEn: string }
         | null = null;
       let area:
-        | { id: string; nameAr: string; nameEn: string; deliveryFee: Prisma.Decimal | null }
+        | { id: string; nameAr: string; nameEn: string }
         | null = null;
       if (input.fulfillmentMethod === "DELIVERY") {
         city = await tx.city.findFirst({
           where: { id: input.cityId, isActive: true },
-          select: { id: true, nameAr: true, nameEn: true, deliveryFee: true },
+          select: { id: true, nameAr: true, nameEn: true },
         });
         if (!city) throw new ValidationError("Selected city is unavailable");
         if (input.areaId) {
           area = await tx.area.findFirst({
             where: { id: input.areaId, cityId: city.id, isActive: true },
-            select: { id: true, nameAr: true, nameEn: true, deliveryFee: true },
+            select: { id: true, nameAr: true, nameEn: true },
           });
           if (!area) throw new ValidationError("Selected area is unavailable");
         }
       }
 
+      const now = new Date();
       const lines = cart.items.map((item) => {
         const availability = getProductAvailability({
           status: item.product.status,
@@ -116,20 +117,12 @@ export async function createOrderFromCart(userId: string, input: CheckoutInput) 
         } catch {
           throw new ValidationError(`Only ${availability.availableStock} of ${item.product.nameEn} remain`);
         }
-        const unitPrice = item.variant?.priceOverride ?? item.product.price;
+        const unitPrice = new Prisma.Decimal(resolveSalePricing({ normalPrice: item.product.price, isOnSale: item.product.isOnSale, salePrice: item.product.salePrice, saleStartsAt: item.product.saleStartsAt, saleEndsAt: item.product.saleEndsAt, productActive: item.product.status === "ACTIVE" && item.product.isAvailable, archived: Boolean(item.product.archivedAt) }, item.variant?.priceOverride ?? item.product.price, now).effectivePrice);
+        if (!unitPrice.equals(item.priceSnapshot)) throw new ValidationError("Cart prices changed. Review and confirm the updated total before placing the order.");
         return { item, unitPrice, unitPriceMinor: moneyToMinor(unitPrice), quantity: item.quantity };
       });
 
-      const deliveryFeeMinor =
-        input.fulfillmentMethod === "DELIVERY" && city
-          ? calculateDeliveryFee({
-              fulfillmentMethod: "DELIVERY",
-              cityFee: city.deliveryFee,
-              areaFee: area?.deliveryFee,
-            })
-          : 0;
-      const totals = calculateOrderTotals(lines, deliveryFeeMinor);
-      const now = new Date();
+      const totals = calculateOrderTotals(lines);
       const created = await tx.order.create({
         data: {
           orderNumber: createOrderNumber(now),
@@ -140,7 +133,7 @@ export async function createOrderFromCart(userId: string, input: CheckoutInput) 
             input.fulfillmentMethod === "DELIVERY" ? "CASH_ON_DELIVERY" : "CASH_ON_PICKUP",
           currency,
           subtotal: new Prisma.Decimal(minorToMoney(totals.subtotalMinor)),
-          deliveryFee: new Prisma.Decimal(minorToMoney(totals.deliveryFeeMinor)),
+          deliveryFee: new Prisma.Decimal(0),
           total: new Prisma.Decimal(minorToMoney(totals.totalMinor)),
           customerName: input.name,
           customerEmail: user.email,
@@ -169,6 +162,8 @@ export async function createOrderFromCart(userId: string, input: CheckoutInput) 
               quantity: item.quantity,
               lineTotal: unitPrice.mul(item.quantity),
               imageUrlSnapshot: item.product.images[0]?.url ?? null,
+              imageAltArSnapshot: item.product.images[0]?.altAr ?? item.product.nameAr,
+              imageAltEnSnapshot: item.product.images[0]?.altEn ?? item.product.nameEn,
             })),
           },
           statusHistory: { create: { toStatus: "NEW" } },
@@ -421,7 +416,7 @@ export async function getCustomerOrders(userId: string, page = 1, pageSize = 20)
         status: true,
         paymentStatus: true,
         fulfillmentMethod: true,
-        total: true,
+        subtotal: true,
         currency: true,
         createdAt: true,
         _count: { select: { items: true } },
@@ -430,7 +425,7 @@ export async function getCustomerOrders(userId: string, page = 1, pageSize = 20)
     db.order.count({ where: { userId } }),
   ]);
   return {
-    orders: orders.map((order) => ({ ...order, total: order.total.toFixed(2) })),
+    orders: orders.map(({ subtotal, ...order }) => ({ ...order, total: subtotal.toFixed(2) })),
     pagination: { page: safePage, pageSize: safePageSize, total, pageCount: Math.ceil(total / safePageSize) },
   };
 }
@@ -444,11 +439,13 @@ export async function getCustomerOrder(userId: string, orderId: string) {
     },
   });
   if (!order) return null;
+  const { deliveryFee: historicalDeliveryFee, total: historicalTotal, ...productOnlyOrder } = order;
+  void historicalDeliveryFee;
+  void historicalTotal;
   return {
-    ...order,
+    ...productOnlyOrder,
     subtotal: order.subtotal.toFixed(2),
-    deliveryFee: order.deliveryFee.toFixed(2),
-    total: order.total.toFixed(2),
+    total: order.subtotal.toFixed(2),
     items: order.items.map((item) => ({
       ...item,
       unitPrice: item.unitPrice.toFixed(2),

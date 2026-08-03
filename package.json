@@ -18,6 +18,7 @@
     "test:e2e": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-e2e.ps1 -Suite storefront",
     "test:e2e:db": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-e2e.ps1 -Suite database",
     "test:e2e:hosts": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-e2e.ps1 -Suite hosts",
+    "test:e2e:responsive": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-e2e.ps1 -Suite responsive",
     "test:e2e:ui": "playwright test --ui",
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",

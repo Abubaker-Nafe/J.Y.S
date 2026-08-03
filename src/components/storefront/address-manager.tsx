@@ -162,10 +162,10 @@ export function AddressManager({ locale, locations }: { locale: Locale; location
     return <div className="grid min-h-64 place-items-center" role="status" aria-live="polite"><LoaderCircle className="size-7 animate-spin text-accent" aria-hidden="true" /><span className="sr-only">{translate(locale, "common.loading")}</span></div>;
   }
 
-  return <section>
-    <div className="flex items-center justify-between gap-4">
-      <div><h2 className="font-display text-3xl font-semibold">{translate(locale, "addresses.title")}</h2><p className="mt-2 text-sm text-muted">{translate(locale, "addresses.emptyText")}</p></div>
-      <Button onClick={open ? closeForm : startNew}><Plus className="size-4" />{open ? translate(locale, "common.cancel") : translate(locale, "addresses.add")}</Button>
+  return <section className="min-w-0">
+    <div className="flex min-w-0 flex-col items-stretch gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0"><h2 className="break-anywhere font-display text-3xl font-semibold">{translate(locale, "addresses.title")}</h2><p className="break-anywhere mt-2 text-sm text-muted">{translate(locale, "addresses.emptyText")}</p></div>
+      <Button className="w-full shrink-0 sm:w-auto" onClick={open ? closeForm : startNew}><Plus className="size-4" />{open ? translate(locale, "common.cancel") : translate(locale, "addresses.add")}</Button>
     </div>
     {locations.source === "unavailable" ? <p role="alert" className="mt-5 rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-800">{locale === "ar" ? "المدن والمناطق غير متاحة من قاعدة البيانات، لذلك لا يمكن إضافة عنوان." : "Cities and areas are unavailable from the database, so an address cannot be added."}</p> : null}
     {feedback ? <p role={feedback.tone === "error" ? "alert" : "status"} className={feedback.tone === "error" ? "mt-5 rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-800" : "mt-5 rounded-xl bg-accent/5 p-3 text-sm font-semibold text-accent"}>{feedback.text}</p> : null}
@@ -181,11 +181,11 @@ export function AddressManager({ locale, locations }: { locale: Locale; location
       <div className="flex justify-end gap-2 sm:col-span-2"><Button type="button" variant="quiet" onClick={closeForm}>{translate(locale, "common.cancel")}</Button><Button type="submit" disabled={pending}>{pending ? translate(locale, "common.loading") : translate(locale, "common.save")}</Button></div>
     </form> : null}
     <div className="mt-6">
-      {addresses.length ? <div className="grid gap-4 sm:grid-cols-2">{addresses.map((address) => <article key={address.id} className="rounded-2xl border border-line bg-surface-strong p-5">
+      {addresses.length ? <div className="grid min-w-0 gap-4 sm:grid-cols-2">{addresses.map((address) => <article key={address.id} className="min-w-0 rounded-2xl border border-line bg-surface-strong p-5">
         <div className="flex items-start justify-between gap-3"><span className="grid size-10 place-items-center rounded-xl bg-brand-strong text-white"><MapPin className="size-4" /></span>{address.isDefault ? <Badge tone="success">{locale === "ar" ? "افتراضي" : "Default"}</Badge> : null}</div>
-        <h3 className="mt-4 font-black">{address.label || address.recipientName}</h3>
-        <p className="mt-2 text-sm leading-6 text-muted">{locale === "ar" ? address.city.nameAr : address.city.nameEn}{address.area ? ` · ${locale === "ar" ? address.area.nameAr : address.area.nameEn}` : ""}<br />{address.addressLine}<br /><span dir="ltr">{address.phone}</span></p>
-        <div className="mt-4 flex flex-wrap gap-1"><button type="button" onClick={() => startEdit(address)} className="inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-bold hover:bg-canvas"><Pencil className="size-4" />{locale === "ar" ? "تعديل" : "Edit"}</button>{!address.isDefault ? <button type="button" disabled={pending} onClick={() => void makeDefault(address.id)} className="rounded-full px-3 py-2 text-xs font-bold hover:bg-canvas">{locale === "ar" ? "تعيين افتراضي" : "Make default"}</button> : null}<button type="button" onClick={() => void remove(address.id)} className="inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50"><Trash2 className="size-4" />{translate(locale, "common.remove")}</button></div>
+        <h3 className="break-anywhere mt-4 font-black">{address.label || address.recipientName}</h3>
+        <p className="break-anywhere mt-2 text-sm leading-6 text-muted">{locale === "ar" ? address.city.nameAr : address.city.nameEn}{address.area ? ` · ${locale === "ar" ? address.area.nameAr : address.area.nameEn}` : ""}<br />{address.addressLine}<br /><span className="break-anywhere" dir="ltr">{address.phone}</span></p>
+        <div className="mt-4 flex min-w-0 flex-wrap gap-1"><button type="button" onClick={() => startEdit(address)} className="inline-flex min-h-11 items-center gap-2 rounded-full px-3 py-2 text-xs font-bold hover:bg-canvas"><Pencil className="size-4" />{locale === "ar" ? "تعديل" : "Edit"}</button>{!address.isDefault ? <button type="button" disabled={pending} onClick={() => void makeDefault(address.id)} className="min-h-11 rounded-full px-3 py-2 text-xs font-bold hover:bg-canvas">{locale === "ar" ? "تعيين افتراضي" : "Make default"}</button> : null}<button type="button" onClick={() => void remove(address.id)} className="inline-flex min-h-11 items-center gap-2 rounded-full px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50"><Trash2 className="size-4" />{translate(locale, "common.remove")}</button></div>
       </article>)}</div> : <EmptyState compact title={translate(locale, "addresses.empty")} text={translate(locale, "addresses.emptyText")} />}
     </div>
   </section>;

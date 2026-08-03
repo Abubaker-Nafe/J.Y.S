@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { salePriceFromPercentage } from "@/lib/domain/pricing";
 
 const bilingualShort = z.string().trim().min(1).max(180);
 const bilingualLong = z.string().trim().min(1).max(20_000);
@@ -33,12 +34,17 @@ export const productVariantSchema = z.object({
 
 export const productMutationSchema = z.object({
   sku: z.string().trim().min(1).max(80),
-  slug,
   nameAr: bilingualShort,
   nameEn: bilingualShort,
   descriptionAr: bilingualLong,
   descriptionEn: bilingualLong,
   price: money,
+  saleEnabled: z.boolean().default(false),
+  saleInputMethod: z.enum(["PRICE", "PERCENTAGE"]).default("PRICE"),
+  salePrice: money.nullable().default(null),
+  salePercentage: z.coerce.number().finite().min(0).max(99.99).nullable().default(null),
+  saleStartsAt: z.string().datetime({ offset: true }).nullable().default(null),
+  saleEndsAt: z.string().datetime({ offset: true }).nullable().default(null),
   stock: quantity,
   lowStockThreshold: quantity.max(100_000),
   categoryId: cuid,
@@ -56,6 +62,20 @@ export const productMutationSchema = z.object({
       skus.add(normalized);
     });
   }),
+}).superRefine((value, context) => {
+  if (!value.saleEnabled) return;
+  if (value.saleInputMethod === "PRICE") {
+    if (value.salePrice === null || value.salePrice <= 0) context.addIssue({ code: "custom", path: ["salePrice"], message: "Sale price must be greater than zero" });
+    else if (value.salePrice >= value.price) context.addIssue({ code: "custom", path: ["salePrice"], message: "Sale price must be lower than the normal price" });
+  } else if (value.salePercentage === null || value.salePercentage <= 0 || value.salePercentage >= 100) {
+    context.addIssue({ code: "custom", path: ["salePercentage"], message: "Discount percentage must be greater than 0 and less than 100" });
+  } else {
+    try { salePriceFromPercentage(value.price, value.salePercentage); }
+    catch { context.addIssue({ code: "custom", path: ["salePercentage"], message: "Discount does not produce a valid sale price" }); }
+  }
+  if (value.saleStartsAt && value.saleEndsAt && value.saleStartsAt >= value.saleEndsAt) {
+    context.addIssue({ code: "custom", path: ["saleEndsAt"], message: "Sale end must be after the start" });
+  }
 });
 
 export const categoryMutationSchema = z.object({
@@ -91,8 +111,8 @@ export const orderMutationSchema = z.object({
 }).refine((value) => Boolean(value.status) !== Boolean(value.paymentStatus), "Change either order status or payment status in one request");
 
 export const locationMutationSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("city"), nameAr: bilingualShort, nameEn: bilingualShort, slug, deliveryFee: money, active: z.boolean(), displayOrder: z.coerce.number().int().min(0).max(100_000) }),
-  z.object({ kind: z.literal("area"), cityId: cuid, nameAr: bilingualShort, nameEn: bilingualShort, slug, deliveryFee: money.nullable(), active: z.boolean(), displayOrder: z.coerce.number().int().min(0).max(100_000) }),
+  z.object({ kind: z.literal("city"), nameAr: bilingualShort, nameEn: bilingualShort, slug, active: z.boolean(), displayOrder: z.coerce.number().int().min(0).max(100_000) }).strict(),
+  z.object({ kind: z.literal("area"), cityId: cuid, nameAr: bilingualShort, nameEn: bilingualShort, slug, active: z.boolean(), displayOrder: z.coerce.number().int().min(0).max(100_000) }).strict(),
 ]);
 
 export const contentMutationSchema = z.object({

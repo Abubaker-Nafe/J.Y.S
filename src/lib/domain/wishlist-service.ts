@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { ValidationError } from "@/lib/validation/common";
+import { resolveSalePricing } from "./pricing";
 
 const wishlistInclude = {
   product: {
@@ -16,15 +17,20 @@ export async function getWishlist(userId: string) {
     orderBy: { createdAt: "desc" },
     include: wishlistInclude,
   });
-  return items.map((item) => ({
+  return items.map((item) => {
+    const pricing = resolveSalePricing({ normalPrice: item.product.price, isOnSale: item.product.isOnSale, salePrice: item.product.salePrice, saleStartsAt: item.product.saleStartsAt, saleEndsAt: item.product.saleEndsAt, productActive: item.product.status === "ACTIVE" && item.product.isAvailable, archived: Boolean(item.product.archivedAt) });
+    return ({
     id: item.id,
+    productId: item.productId,
     createdAt: item.createdAt,
     product: {
       id: item.product.id,
-      slug: item.product.slug,
       nameAr: item.product.nameAr,
       nameEn: item.product.nameEn,
       price: item.product.price.toFixed(2),
+      effectivePrice: pricing.effectivePrice,
+      onSale: pricing.isOnSale,
+      discountPercentage: pricing.discountPercentage,
       imageUrl: item.product.images[0]?.url ?? null,
       isAvailable:
         item.product.status === "ACTIVE" &&
@@ -34,7 +40,8 @@ export async function getWishlist(userId: string) {
           ? item.product.variants.some((variant) => variant.isActive && variant.isAvailable && variant.stockQuantity > 0)
           : item.product.stockQuantity > 0),
     },
-  }));
+  });
+  });
 }
 
 export async function addWishlistItem(userId: string, productId: string) {

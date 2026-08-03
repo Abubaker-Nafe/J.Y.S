@@ -13,6 +13,7 @@ export function adminErrorText(locale: AdminLocale, value: string) {
   if (text.includes("authentication")) return "يرجى تسجيل الدخول للمتابعة.";
   if (text.includes("permission")) return "ليست لديك صلاحية لإجراء هذه العملية.";
   if (text.includes("stock") || text.includes("inventory")) return "تعذر تحديث المخزون. تحقق من الكمية المتاحة والقيمة المدخلة.";
+  if (text.includes("payment status cannot be changed after")) return "لا يمكن تغيير حالة الدفع بعد توصيل الطلب أو إلغائه.";
   if (text.includes("transition") || text.includes("cannot move")) return "لا يمكن نقل الطلب إلى هذه الحالة من حالته الحالية.";
   if (text.includes("unique") || text.includes("already exists")) return "توجد قيمة مطابقة مستخدمة مسبقًا. تحقق من الرمز أو الرابط.";
   if (text.includes("not found") || text.includes("no longer exists")) return "لم يعد السجل المطلوب موجودًا. حدّث الصفحة وحاول مجددًا.";

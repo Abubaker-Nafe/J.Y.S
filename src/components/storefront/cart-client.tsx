@@ -14,12 +14,14 @@ import { QuantityControl } from "./quantity-control";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonStyles } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { SalePrice } from "./sale-price";
 
 export function CartClient({ locale }: { locale: Locale }) {
   const router = useRouter();
-  const { lines, subtotal, cartCurrency, cartIssues, user, updateQuantity, removeFromCart, refreshCart, syncCart } = useStore();
+  const { lines, subtotal, cartCurrency, cartIssues, user, updateQuantity, removeFromCart, refreshCart, syncCart, acknowledgePriceChanges } = useStore();
   const [checkingOut, setCheckingOut] = useState(false);
   const [validationError, setValidationError] = useState("");
+  const [reviewingPrices, setReviewingPrices] = useState(false);
   const t = (key: string) => translate(locale, key);
   const priceChanged = cartIssues.some((issue) => issue.code === "PRICE_CHANGED");
   const availabilityChanged = cartIssues.some((issue) => issue.code === "UNAVAILABLE_OR_LOW_STOCK");
@@ -46,9 +48,10 @@ export function CartClient({ locale }: { locale: Locale }) {
           <div id="cart-server-warning" role="alert" className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-950">
             <div className="flex gap-3">
               <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
-              <div>
+              <div className="min-w-0">
                 {priceChanged ? <p>{locale === "ar" ? "تغيّر سعر منتج واحد أو أكثر. راجع الأسعار الحالية قبل المتابعة." : "One or more product prices changed. Review the current prices before continuing."}</p> : null}
                 {availabilityChanged ? <p>{locale === "ar" ? "تغيّر توفر المخزون لبعض المنتجات. عدّل الكمية أو أزل المنتج غير المتاح." : "Stock availability changed for some items. Adjust the quantity or remove unavailable items."}</p> : null}
+                {priceChanged ? <button type="button" disabled={reviewingPrices} onClick={() => { setReviewingPrices(true); void acknowledgePriceChanges().then((ok) => { if (!ok) setValidationError(locale === "ar" ? "تعذر تأكيد الأسعار الجديدة. حاول مرة أخرى." : "The updated prices could not be confirmed. Try again."); setReviewingPrices(false); }); }} className="mt-3 rounded-full bg-amber-950 px-4 py-2 text-xs font-black text-white hover:bg-black disabled:opacity-60">{reviewingPrices ? (locale === "ar" ? "جارٍ التأكيد…" : "Confirming…") : (locale === "ar" ? "راجعت الأسعار الجديدة" : "I reviewed the updated prices")}</button> : null}
               </div>
             </div>
           </div>
@@ -59,12 +62,12 @@ export function CartClient({ locale }: { locale: Locale }) {
           const excessive = line.quantity > line.availableStock;
           return (
             <article key={line.key} className={cn("grid grid-cols-[6rem_1fr] gap-4 rounded-2xl border bg-surface-strong p-3 sm:grid-cols-[8rem_1fr] sm:p-4", unavailable || excessive ? "border-amber-400" : "border-line")}>
-              <Link href={`/${locale}/product/${line.product.slug}`} className="overflow-hidden rounded-xl"><ProductVisual product={line.product} className="aspect-square w-full" /></Link>
+              <Link href={`/${locale}/product/${line.product.id}`} className="overflow-hidden rounded-xl"><ProductVisual product={line.product} className="aspect-square w-full" /></Link>
               <div className="flex min-w-0 flex-col sm:flex-row sm:justify-between sm:gap-4">
                 <div className="min-w-0">
-                  <h2 className="truncate font-bold"><Link href={`/${locale}/product/${line.product.slug}`} className="hover:text-accent">{localize(line.product.name, locale)}</Link></h2>
+                  <h2 className="truncate font-bold"><Link href={`/${locale}/product/${line.product.id}`} className="hover:text-accent">{localize(line.product.name, locale)}</Link></h2>
                   {variant ? <p className="mt-1 text-sm text-muted">{localize(variant.label, locale)}</p> : null}
-                  <p className="mt-2 font-black">{formatMoney(line.unitPrice, locale, cartCurrency)}</p>
+                  <SalePrice className="mt-2" locale={locale} currency={cartCurrency} normalPrice={variant?.price ?? line.product.price} effectivePrice={line.unitPrice} />
                   {unavailable ? (
                     <p className="mt-1 flex items-center gap-1 text-xs font-bold text-red-700"><AlertTriangle className="size-3.5" />{locale === "ar" ? "غير متاح حاليًا — أزل المنتج للمتابعة." : "Currently unavailable — remove this item to continue."}</p>
                   ) : excessive ? (
@@ -92,10 +95,9 @@ export function CartClient({ locale }: { locale: Locale }) {
         <h2 className="font-display text-2xl font-semibold">{t("cart.summary")}</h2>
         <dl className="mt-6 space-y-4 text-sm">
           <div className="flex justify-between gap-4"><dt className="text-muted">{t("cart.subtotal")}</dt><dd className="font-bold">{formatMoney(subtotal, locale, cartCurrency)}</dd></div>
-          <div className="flex justify-between gap-4"><dt className="text-muted">{t("cart.delivery")}</dt><dd className="font-semibold text-muted">{t("cart.deliveryLater")}</dd></div>
           <div className="flex justify-between gap-4 border-t border-line pt-4 text-lg"><dt className="font-black">{t("cart.total")}</dt><dd className="font-black">{formatMoney(subtotal, locale, cartCurrency)}</dd></div>
         </dl>
-        {invalidStock ? (
+        {invalidStock || priceChanged ? (
           <span aria-disabled="true" aria-describedby="cart-server-warning" className={buttonStyles({ size: "lg", className: "mt-6 w-full cursor-not-allowed opacity-50" })}>{t("cart.checkout")}<ArrowUpRight className="size-4 rtl:-scale-x-100" /></span>
         ) : (
           <button type="button" disabled={checkingOut} onClick={() => void continueToCheckout()} aria-describedby={cartIssues.length ? "cart-server-warning" : undefined} className={buttonStyles({ size: "lg", className: "mt-6 w-full" })}>{checkingOut ? (locale === "ar" ? "جارٍ التحقق…" : "Checking stock…") : t("cart.checkout")}<ArrowUpRight className="size-4 rtl:-scale-x-100" /></button>

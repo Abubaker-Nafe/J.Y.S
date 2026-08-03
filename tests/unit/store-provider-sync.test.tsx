@@ -7,7 +7,6 @@ import { StoreProvider, useStore } from "@/components/storefront/store-provider"
 
 const product: Product = {
   id: "product-1",
-  slug: "test-product",
   sku: "TEST-1",
   name: { ar: "منتج", en: "Test product" },
   description: { ar: "", en: "" },
@@ -66,7 +65,7 @@ describe("authenticated cart synchronization", () => {
           unitPrice: 10,
           availableStock: 5,
           isAvailable: true,
-          product: { slug: "test-product", nameAr: "منتج", nameEn: "Test product" },
+          product: { nameAr: "منتج", nameEn: "Test product" },
         }];
         return json({ cart: { items: serverItems, currency: "ILS", issues: [] } }, 201);
       }
@@ -117,7 +116,7 @@ describe("authenticated cart synchronization", () => {
           unitPrice: 10,
           availableStock: 5,
           isAvailable: true,
-          product: { slug: product.slug, nameAr: product.name.ar, nameEn: product.name.en },
+          product: { nameAr: product.name.ar, nameEn: product.name.en },
         }] } }, 201);
       }
       throw new Error(`Unexpected request: ${url} ${init?.method ?? "GET"}`);
@@ -126,6 +125,8 @@ describe("authenticated cart synchronization", () => {
 
     render(<StoreProvider locale="en" catalogProducts={[product]}><Harness /></StoreProvider>);
     await screen.findByText("authenticated");
+    await waitFor(() => expect(gets).toBe(1));
+    expect(resolveInitialCart).toBeTypeOf("function");
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(screen.getByLabelText("Cart count").textContent).toBe("1");
 

@@ -5,6 +5,7 @@ import type { AddCartItemInput } from "@/lib/validation/commerce";
 import { getProductAvailability, validateRequestedQuantity } from "./catalog";
 import { currencyFromSetting } from "./currency";
 import { minorToMoney, moneyToMinor } from "./money";
+import { resolveSalePricing } from "./pricing";
 
 const cartInclude = {
   items: {
@@ -22,6 +23,10 @@ const cartInclude = {
 } satisfies Prisma.CartInclude;
 
 type CartWithItems = Prisma.CartGetPayload<{ include: typeof cartInclude }>;
+
+function effectivePrice(product: CartWithItems["items"][number]["product"], variant: CartWithItems["items"][number]["variant"], now = new Date()) {
+  return new Prisma.Decimal(resolveSalePricing({ normalPrice: product.price, isOnSale: product.isOnSale, salePrice: product.salePrice, saleStartsAt: product.saleStartsAt, saleEndsAt: product.saleEndsAt, productActive: product.status === "ACTIVE" && product.isAvailable, archived: Boolean(product.archivedAt) }, variant?.priceOverride ?? product.price, now).effectivePrice);
+}
 
 async function activeCart(userId: string): Promise<CartWithItems | null> {
   return db.cart.findFirst({
@@ -49,7 +54,7 @@ function serializeCart(cart: CartWithItems | null, currency: string) {
           }
         : null,
     });
-    const currentPrice = item.variant?.priceOverride ?? item.product.price;
+    const currentPrice = effectivePrice(item.product, item.variant);
     const unitPriceMinor = moneyToMinor(currentPrice);
     const priceChanged = !currentPrice.equals(item.priceSnapshot);
     const isAvailable = availability.available && item.quantity <= availability.availableStock;
@@ -66,7 +71,6 @@ function serializeCart(cart: CartWithItems | null, currency: string) {
       availableStock: availability.available ? availability.availableStock : 0,
       isAvailable,
       product: {
-        slug: item.product.slug,
         nameAr: item.product.nameAr,
         nameEn: item.product.nameEn,
         imageUrl: item.product.images[0]?.url ?? null,
@@ -91,6 +95,19 @@ export async function getCart(userId: string) {
     db.siteSetting.findUnique({ where: { key: "commerce.currency" }, select: { value: true } }),
   ]);
   return serializeCart(cart, currencyFromSetting(currencySetting?.value));
+}
+
+export async function acknowledgeCartPrices(userId: string) {
+  await db.$transaction(async (tx) => {
+    const cart = await tx.cart.findFirst({ where: { userId, status: "ACTIVE" }, orderBy: { updatedAt: "desc" }, include: cartInclude });
+    if (!cart) return;
+    const now = new Date();
+    for (const item of cart.items) {
+      const priceSnapshot = effectivePrice(item.product, item.variant, now);
+      if (!priceSnapshot.equals(item.priceSnapshot)) await tx.cartItem.update({ where: { id: item.id }, data: { priceSnapshot } });
+    }
+  });
+  return getCart(userId);
 }
 
 export async function addCartItem(userId: string, input: AddCartItemInput) {
@@ -129,7 +146,7 @@ export async function addCartItem(userId: string, input: AddCartItemInput) {
     });
     const quantity = (existing?.quantity ?? 0) + input.quantity;
     validateRequestedQuantity(quantity, availability.availableStock);
-    const price = variant?.priceOverride ?? product.price;
+    const price = new Prisma.Decimal(resolveSalePricing({ normalPrice: product.price, isOnSale: product.isOnSale, salePrice: product.salePrice, saleStartsAt: product.saleStartsAt, saleEndsAt: product.saleEndsAt, productActive: product.status === "ACTIVE" && product.isAvailable, archived: Boolean(product.archivedAt) }, variant?.priceOverride ?? product.price).effectivePrice);
     await tx.cartItem.upsert({
       where: { cartId_targetKey: { cartId: cart.id, targetKey } },
       create: {
@@ -170,7 +187,8 @@ export async function updateCartItem(userId: string, itemId: string, quantity: n
     });
     if (!availability.available) throw new ValidationError("This product is no longer available");
     validateRequestedQuantity(quantity, availability.availableStock);
-    await tx.cartItem.update({ where: { id: item.id }, data: { quantity } });
+    const priceSnapshot = new Prisma.Decimal(resolveSalePricing({ normalPrice: item.product.price, isOnSale: item.product.isOnSale, salePrice: item.product.salePrice, saleStartsAt: item.product.saleStartsAt, saleEndsAt: item.product.saleEndsAt, productActive: item.product.status === "ACTIVE" && item.product.isAvailable, archived: Boolean(item.product.archivedAt) }, item.variant?.priceOverride ?? item.product.price).effectivePrice);
+    await tx.cartItem.update({ where: { id: item.id }, data: { quantity, priceSnapshot } });
   });
   return getCart(userId);
 }

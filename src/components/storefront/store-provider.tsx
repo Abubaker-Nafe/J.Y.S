@@ -22,10 +22,11 @@ interface StoreContextValue {
   toggleWishlist: (productId: string) => void; isWishlisted: (productId: string) => boolean;
   setSessionUser: (user: StoreUser | null) => void; clearCustomerSession: () => void; refreshSession: () => Promise<void>;
   syncCart: () => Promise<boolean>; refreshCart: (force?: boolean) => Promise<boolean>;
+  acknowledgePriceChanges: () => Promise<boolean>;
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
-type ApiCartItem = { id: string; productId: string; variantId?: string | null; quantity: number; unitPrice?: number | string; availableStock?: number; isAvailable?: boolean; product?: { slug?: string; nameAr?: string; nameEn?: string; imageUrl?: string | null; variantLabelAr?: string | null; variantLabelEn?: string | null } };
+type ApiCartItem = { id: string; productId: string; variantId?: string | null; quantity: number; unitPrice?: number | string; availableStock?: number; isAvailable?: boolean; product?: { nameAr?: string; nameEn?: string; imageUrl?: string | null; variantLabelAr?: string | null; variantLabelEn?: string | null } };
 type CartPayload = { cart?: { items?: ApiCartItem[]; currency?: string; issues?: CartIssue[] } };
 
 export function StoreProvider({ locale, initialCurrency = "ILS", catalogProducts = [], children }: { locale: Locale; initialCurrency?: string; catalogProducts?: Product[]; children: ReactNode }) {
@@ -51,6 +52,14 @@ export function StoreProvider({ locale, initialCurrency = "ILS", catalogProducts
   const syncedCartRevision = useRef(0);
   const [cartMutationVersion, setCartMutationVersion] = useState(0);
   const sessionReady = sessionStatus !== "loading";
+  useEffect(() => {
+    document.documentElement.dataset.jysHydrated = "true";
+    return () => { delete document.documentElement.dataset.jysHydrated; };
+  }, []);
+  useEffect(() => {
+    document.documentElement.dataset.jysSessionStatus = sessionStatus;
+    return () => { delete document.documentElement.dataset.jysSessionStatus; };
+  }, [sessionStatus]);
   useEffect(() => { cartRef.current = cart; }, [cart]);
   useEffect(() => { catalogProductsRef.current = catalogProducts; }, [catalogProducts]);
   useEffect(() => { userRef.current = user; }, [user]);
@@ -83,7 +92,7 @@ export function StoreProvider({ locale, initialCurrency = "ILS", catalogProducts
   const lines = useMemo(() => cart.flatMap((entry): CartLine[] => {
     const product = entry.product ?? catalogProducts.find((item) => item.id === entry.productId); if (!product) return [];
     const variant = product.variants.find((item) => item.id === entry.variantId);
-    return [{ ...entry, product, unitPrice: variant?.price ?? product.price, availableStock: variant?.stock ?? product.stock }];
+    return [{ ...entry, product, unitPrice: variant?.effectivePrice ?? product.effectivePrice ?? variant?.price ?? product.price, availableStock: variant?.stock ?? product.stock }];
   }), [cart, catalogProducts]);
   const subtotal = useMemo(() => lines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0), [lines]);
   const cartCount = useMemo(() => cart.reduce((sum, item) => sum + item.quantity, 0), [cart]);
@@ -166,12 +175,12 @@ export function StoreProvider({ locale, initialCurrency = "ILS", catalogProducts
       const available = item.isAvailable ?? stock > 0;
       const fallback: Product = {
         id: item.productId,
-        slug: item.product?.slug ?? item.productId,
         sku: "",
         name: { ar: item.product?.nameAr ?? "", en: item.product?.nameEn ?? "" },
         description: { ar: "", en: "" },
         categorySlug: "",
         price: unitPrice,
+        effectivePrice: unitPrice,
         stock,
         featured: false,
         createdAt: "",
@@ -184,7 +193,7 @@ export function StoreProvider({ locale, initialCurrency = "ILS", catalogProducts
         ar: item.product?.nameAr ?? product.name.ar,
         en: item.product?.nameEn ?? product.name.en,
       };
-      if (!item.variantId) return { ...product, name, price: unitPrice, stock };
+      if (!item.variantId) return { ...product, name, effectivePrice: unitPrice, onSale: unitPrice < product.price, stock };
       const currentVariant = product.variants.find((variant) => variant.id === item.variantId);
       const serverVariant = {
         id: item.variantId,
@@ -193,7 +202,8 @@ export function StoreProvider({ locale, initialCurrency = "ILS", catalogProducts
           ar: item.product?.variantLabelAr ?? currentVariant?.label.ar ?? "",
           en: item.product?.variantLabelEn ?? currentVariant?.label.en ?? "",
         },
-        price: unitPrice,
+        effectivePrice: unitPrice,
+        onSale: unitPrice < (currentVariant?.price ?? product.price),
         stock,
         available,
       };
@@ -279,8 +289,10 @@ export function StoreProvider({ locale, initialCurrency = "ILS", catalogProducts
           const available = availableStock > 0 && (!variant || variant.available);
           if (!available || entry.quantity > availableStock) issues.push({ itemId: entry.key, code: "UNAVAILABLE_OR_LOW_STOCK" });
           if (previous && fresh) {
-            const oldPrice = previous.variants.find((item) => item.id === entry.variantId)?.price ?? previous.price;
-            const newPrice = fresh.variants.find((item) => item.id === entry.variantId)?.price ?? fresh.price;
+            const oldVariant = previous.variants.find((item) => item.id === entry.variantId);
+            const newVariant = fresh.variants.find((item) => item.id === entry.variantId);
+            const oldPrice = oldVariant?.effectivePrice ?? previous.effectivePrice ?? oldVariant?.price ?? previous.price;
+            const newPrice = newVariant?.effectivePrice ?? fresh.effectivePrice ?? newVariant?.price ?? fresh.price;
             if (oldPrice !== newPrice) issues.push({ itemId: entry.key, code: "PRICE_CHANGED" });
           }
           return product ? { ...entry, product } : entry;
@@ -359,6 +371,23 @@ export function StoreProvider({ locale, initialCurrency = "ILS", catalogProducts
       return false;
     }
   }), [acceptServerCart, runCartOperation]);
+  const acknowledgePriceChanges = useCallback(() => {
+    if (!userRef.current) {
+      lastCartRefreshAt.current = 0;
+      return refreshCart(true);
+    }
+    return runCartOperation(async () => {
+    try {
+      const response = await fetch("/api/cart", { method: "PATCH", headers: { Accept: "application/json" } });
+      if (!response.ok) return false;
+      acceptServerCart(await response.json() as CartPayload, "replace");
+      lastCartRefreshAt.current = Date.now();
+      return true;
+    } catch {
+      return false;
+    }
+    });
+  }, [acceptServerCart, refreshCart, runCartOperation]);
   useEffect(() => {
     const userKey = user?.id ?? user?.email ?? null;
     if (!userKey || syncedForUser.current === userKey) return;
@@ -400,8 +429,8 @@ export function StoreProvider({ locale, initialCurrency = "ILS", catalogProducts
     return () => controller.abort();
   }, [user, wishlist]);
 
-  const value = useMemo<StoreContextValue>(() => ({ locale, cart, lines, cartCount, subtotal, cartCurrency, cartIssues, wishlist, user, sessionReady, sessionStatus, sessionError, addToCart, updateQuantity, removeFromCart, clearCart, toggleWishlist, isWishlisted, setSessionUser, clearCustomerSession, refreshSession, syncCart, refreshCart }), [locale, cart, lines, cartCount, subtotal, cartCurrency, cartIssues, wishlist, user, sessionReady, sessionStatus, sessionError, addToCart, updateQuantity, removeFromCart, clearCart, toggleWishlist, isWishlisted, setSessionUser, clearCustomerSession, refreshSession, syncCart, refreshCart]);
-  return <StoreContext.Provider value={value}>{children}{notice ? <div role="status" aria-live="polite" aria-atomic="true" className="fixed bottom-5 left-1/2 z-[80] flex -translate-x-1/2 items-center gap-3 rounded-full bg-brand-strong px-5 py-3 text-sm font-bold text-white shadow-2xl"><CheckCircle2 className="size-5 text-emerald-300" aria-hidden="true" />{notice}<button type="button" onClick={() => setNotice(null)} className="ms-1 rounded-full p-1 hover:bg-white/10" aria-label={locale === "ar" ? "إغلاق الإشعار" : "Dismiss notification"}><X className="size-4" aria-hidden="true" /></button></div> : null}</StoreContext.Provider>;
+  const value = useMemo<StoreContextValue>(() => ({ locale, cart, lines, cartCount, subtotal, cartCurrency, cartIssues, wishlist, user, sessionReady, sessionStatus, sessionError, addToCart, updateQuantity, removeFromCart, clearCart, toggleWishlist, isWishlisted, setSessionUser, clearCustomerSession, refreshSession, syncCart, refreshCart, acknowledgePriceChanges }), [locale, cart, lines, cartCount, subtotal, cartCurrency, cartIssues, wishlist, user, sessionReady, sessionStatus, sessionError, addToCart, updateQuantity, removeFromCart, clearCart, toggleWishlist, isWishlisted, setSessionUser, clearCustomerSession, refreshSession, syncCart, refreshCart, acknowledgePriceChanges]);
+  return <StoreContext.Provider value={value}>{children}{notice ? <div role="status" aria-live="polite" aria-atomic="true" className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] left-1/2 z-[80] flex w-max max-w-[calc(100dvw-2rem)] -translate-x-1/2 items-center gap-3 rounded-2xl bg-brand-strong px-4 py-3 text-sm font-bold text-white shadow-2xl"><CheckCircle2 className="size-5 shrink-0 text-emerald-300" aria-hidden="true" /><span className="break-anywhere">{notice}</span><button type="button" onClick={() => setNotice(null)} className="ms-1 grid size-9 shrink-0 place-items-center rounded-full hover:bg-white/10" aria-label={locale === "ar" ? "إغلاق الإشعار" : "Dismiss notification"}><X className="size-4" aria-hidden="true" /></button></div> : null}</StoreContext.Provider>;
 }
 
 export function useStore(): StoreContextValue {

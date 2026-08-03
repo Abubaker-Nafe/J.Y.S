@@ -3,7 +3,6 @@ import { locationMutationSchema, orderMutationSchema, productMutationSchema, set
 
 const product = {
   sku: "JYS-TEST-1",
-  slug: "test-product",
   nameAr: "منتج تجريبي",
   nameEn: "Test product",
   descriptionAr: "وصف عربي واضح",
@@ -31,6 +30,14 @@ describe("admin mutation validation", () => {
     expect(result.success).toBe(false);
   });
 
+  it("accepts sale price or percentage input and rejects invalid promotions", () => {
+    expect(productMutationSchema.safeParse({ ...product, saleEnabled: true, saleInputMethod: "PRICE", salePrice: 10, salePercentage: null }).success).toBe(true);
+    expect(productMutationSchema.safeParse({ ...product, saleEnabled: true, saleInputMethod: "PERCENTAGE", salePrice: null, salePercentage: 20 }).success).toBe(true);
+    expect(productMutationSchema.safeParse({ ...product, saleEnabled: true, saleInputMethod: "PRICE", salePrice: 12.5 }).success).toBe(false);
+    expect(productMutationSchema.safeParse({ ...product, saleEnabled: true, saleInputMethod: "PERCENTAGE", salePercentage: 100 }).success).toBe(false);
+    expect(productMutationSchema.safeParse({ ...product, saleEnabled: true, saleInputMethod: "PRICE", salePrice: 10, saleStartsAt: "2026-09-01T00:00:00.000Z", saleEndsAt: "2026-08-01T00:00:00.000Z" }).success).toBe(false);
+  });
+
   it("permits exactly one order field per status mutation", () => {
     expect(orderMutationSchema.safeParse({ status: "CONFIRMED", note: "Stock checked" }).success).toBe(true);
     expect(orderMutationSchema.safeParse({ paymentStatus: "PAID" }).success).toBe(true);
@@ -38,8 +45,9 @@ describe("admin mutation validation", () => {
     expect(orderMutationSchema.safeParse({}).success).toBe(false);
   });
 
-  it("rejects negative delivery fees", () => {
-    expect(locationMutationSchema.safeParse({ kind: "city", nameAr: "رام الله", nameEn: "Ramallah", slug: "ramallah", deliveryFee: -1, active: true, displayOrder: 0 }).success).toBe(false);
+  it("rejects obsolete delivery-fee input", () => {
+    expect(locationMutationSchema.safeParse({ kind: "city", nameAr: "رام الله", nameEn: "Ramallah", slug: "ramallah", deliveryFee: 10, active: true, displayOrder: 0 }).success).toBe(false);
+    expect(locationMutationSchema.safeParse({ kind: "city", nameAr: "رام الله", nameEn: "Ramallah", slug: "ramallah", active: true, displayOrder: 0 }).success).toBe(true);
   });
 
   it("whitelists setting keys and exact nested fields", () => {

@@ -14,9 +14,10 @@ function csv(headers: Array<string | number>, rows: Array<Array<string | number 
 }
 
 export function productReportCsv(report: AdminReportData, locale: AdminLocale) {
-  const headers = locale === "ar"
+  const baseHeaders = locale === "ar"
     ? ["SKU", "المنتج", "التصنيف", "الوحدات المباعة", "الإيراد", "المشاهدات", "قوائم الأمنيات", "في السلات", "المخزون"]
     : ["SKU", "Product", "Category", "Units sold", "Revenue", "Views", "Wishlists", "In carts", "Stock"];
+  const headers = [...baseHeaders, ...(locale === "ar" ? ["السعر العادي", "سعر العرض", "السعر الفعّال", "نسبة الخصم %", "حالة العرض"] : ["Normal price", "Sale price", "Effective price", "Discount %", "Sale status"])];
   const rows = report.products.map((product) => [
     product.sku,
     locale === "ar" ? product.nameAr || product.nameEn : product.nameEn || product.nameAr,
@@ -27,18 +28,23 @@ export function productReportCsv(report: AdminReportData, locale: AdminLocale) {
     product.wishlists,
     product.cartAdds,
     product.stock,
+    product.normalPrice.toFixed(2),
+    product.salePrice?.toFixed(2) ?? "",
+    product.effectivePrice.toFixed(2),
+    product.discountPercentage.toFixed(2),
+    product.saleStatus,
   ]);
   return csv(headers, rows);
 }
 
 export function ordersReportCsv(report: AdminReportData, locale: AdminLocale) {
   const headers = locale === "ar"
-    ? ["رقم الطلب", "التاريخ", "العميل", "البريد الإلكتروني", "الهاتف", "طريقة التسليم", "طريقة الدفع", "حالة الدفع", "حالة الطلب", "عدد الأصناف", "الإجمالي الفرعي", "رسوم التوصيل", "الإجمالي", "العملة"]
-    : ["Order number", "Date", "Customer", "Email", "Phone", "Fulfillment", "Payment method", "Payment status", "Order status", "Item count", "Subtotal", "Delivery fee", "Total", "Currency"];
+    ? ["رقم الطلب", "التاريخ", "العميل", "البريد الإلكتروني", "الهاتف", "طريقة التسليم", "طريقة الدفع", "حالة الدفع", "حالة الطلب", "عدد الأصناف", "إجمالي المنتجات", "الإجمالي", "العملة"]
+    : ["Order number", "Date", "Customer", "Email", "Phone", "Fulfillment", "Payment method", "Payment status", "Order status", "Item count", "Product total", "Total", "Currency"];
   return csv(headers, report.orders.map((order) => [
     order.orderNumber, order.createdAt, order.customerName, order.customerEmail, order.customerPhone,
     order.fulfillmentMethod, order.paymentMethod, order.paymentStatus, order.status, order.itemCount,
-    order.subtotal.toFixed(2), order.deliveryFee.toFixed(2), order.total.toFixed(2), order.currency,
+    order.subtotal.toFixed(2), order.total.toFixed(2), order.currency,
   ]));
 }
 

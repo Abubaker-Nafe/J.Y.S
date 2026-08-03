@@ -24,6 +24,7 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNod
 import { adminMessages } from "@/lib/admin/i18n";
 import type { AdminActor, AdminLocale } from "@/lib/admin/types";
 import { useStore } from "@/components/storefront/store-provider";
+import { Tooltip } from "@/components/ui/tooltip";
 import styles from "./admin.module.css";
 
 const navItems = [
@@ -149,9 +150,9 @@ export function AdminShell({ locale, actor, children }: { locale: AdminLocale; a
               <strong>{messages.brand}</strong>
               <small>{messages.section}</small>
             </span>
-            <button className={`${styles.buttonSecondary} ${styles.iconButton} ${styles.mobileClose}`} type="button" aria-label={messages.closeMenu} onClick={() => setMenuOpen(false)}>
+            <Tooltip label={messages.closeMenu}><button className={`${styles.buttonSecondary} ${styles.iconButton} ${styles.mobileClose}`} type="button" aria-label={messages.closeMenu} onClick={() => setMenuOpen(false)}>
               <X size={18} aria-hidden="true" />
-            </button>
+            </button></Tooltip>
           </div>
           <nav className={styles.nav}>
             {navItems.map(([key, suffix, Icon]) => {
@@ -179,9 +180,9 @@ export function AdminShell({ locale, actor, children }: { locale: AdminLocale; a
         </aside>
         <div className={styles.contentColumn} inert={drawerOpen ? true : undefined} aria-hidden={drawerOpen || undefined}>
           <header className={styles.topbar}>
-            <button ref={menuButtonRef} className={`${styles.buttonSecondary} ${styles.iconButton} ${styles.mobileMenuButton}`} type="button" aria-controls={menuId} aria-expanded={drawerOpen} aria-label={messages.openMenu} onClick={(event) => { event.currentTarget.blur(); setMenuOpen(true); }}>
+            <Tooltip label={messages.openMenu}><button ref={menuButtonRef} className={`${styles.buttonSecondary} ${styles.iconButton} ${styles.mobileMenuButton}`} type="button" aria-controls={menuId} aria-expanded={drawerOpen} aria-label={messages.openMenu} onClick={(event) => { event.currentTarget.blur(); setMenuOpen(true); }}>
               <Menu size={19} aria-hidden="true" />
-            </button>
+            </button></Tooltip>
             <Link className={styles.localeLink} href={switchedPath} lang={otherLocale} hrefLang={otherLocale}>
               <Languages size={17} aria-hidden="true" />
               {locale === "ar" ? "English" : "العربية"}

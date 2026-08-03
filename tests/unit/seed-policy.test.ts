@@ -41,7 +41,6 @@ describe("development seed safety policy", () => {
   it("omits product and variant operational state from repeat-seed updates", () => {
     const product = existingSeedProductUpdate({
       categoryId: "category",
-      slug: "product",
       nameAr: "منتج",
       nameEn: "Product",
       descriptionAr: "وصف",
@@ -59,6 +58,7 @@ describe("development seed safety policy", () => {
     });
 
     expect(product).not.toHaveProperty("stockQuantity");
+    expect(product).not.toHaveProperty("slug");
     expect(product).not.toHaveProperty("status");
     expect(product).not.toHaveProperty("archivedAt");
     expect(variant).not.toHaveProperty("stockQuantity");

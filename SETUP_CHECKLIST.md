@@ -59,9 +59,23 @@ npx.cmd prisma studio
 - Seed development: `npm.cmd run db:seed`
 - Inspect data locally: `npx.cmd prisma studio` (do not expose Studio publicly)
 
-Final local verification on 2026-07-26 used PostgreSQL database `JYS_DB` at `localhost:5432`: the migrated database completed the customer, stale-cart, concurrent-stock, inventory, reports, export, and admin browser suites. The inventory/availability migration is `prisma/migrations/20260724000100_product_availability_inventory_audit/migration.sql`; deploy it with `npx.cmd prisma migrate deploy` outside local schema-development work.
+Final local verification on 2026-08-03 used PostgreSQL database `JYS_DB` at `localhost:5432`. The latest migration is `prisma/migrations/20260802000100_add_product_sales/migration.sql`; it adds `Product.isOnSale`, `salePrice`, `saleStartsAt`, `saleEndsAt`, and `saleUpdatedAt`, database price/date constraints, and the public-sale query index. The preceding `20260801000100_product_id_routes_order_image_alts` migration removes `Product.slug` and adds localized order-item image-alt snapshots. Deploy all committed migrations with `npx.cmd prisma migrate deploy` outside local schema-development work.
 
-The development seed is deterministic on an empty database and conservative on repeat runs. Existing product/variant stock and availability, product lifecycle state, seeded orders (including payment and fulfillment status), and inventory-ledger entries are preserved. Use the admin inventory and order workflows for operational changes; do not rerun the seed expecting it to reset a used database.
+The development seed is deterministic on an empty database and conservative on repeat runs. Existing product/variant stock and availability, product lifecycle state, administrator-managed sale configuration, seeded orders (including payment and fulfillment status), and inventory-ledger entries are preserved. Sample sales are added only to eligible untouched seed products and are calculated from the product's current database normal price. Use the admin product, inventory, and order workflows for operational changes; do not rerun the seed expecting it to reset a used database.
+
+### Product sales
+
+- Admin create path: `/en/admin/products/new` or `/ar/admin/products/new`
+- Admin edit path: `/en/admin/products/[id]` or `/ar/admin/products/[id]`
+- Admin filter example: `/en/admin/products?sale=ACTIVE` (`ACTIVE`, `SCHEDULED`, `EXPIRED`, or `DISABLED`)
+- Public discovery: `/en/on-sale` and `/ar/on-sale`
+- Schema: `prisma/schema.prisma` (`Product.isOnSale`, `salePrice`, `saleStartsAt`, `saleEndsAt`, `saleUpdatedAt`)
+- Shared authority: `src/lib/domain/pricing.ts`
+- Admin validation: `src/lib/admin/schemas.ts`
+- Public query/mapping: `src/lib/catalog/server.ts`
+- Environment variables: none; sales do not require a coupon service, payment provider, or production-domain constant.
+
+Enable **Sale**, choose direct **Sale price** or **Percentage**, enter the value and optional local start/end date-times, confirm the live normal/final-price preview and status, then save. A valid sale must have a positive final price below the normal price and a valid optional date range, and its product must remain active, available, and non-archived. Variants inherit the base product's discount ratio and apply it to their own override price using the same integer-minor-unit rounding rule. The server recalculates cart and checkout prices from PostgreSQL; a changed price must be explicitly acknowledged in the cart before checkout, while existing `OrderItem.unitPrice` values remain immutable purchase-time history.
 
 ## Authentication
 
@@ -104,7 +118,10 @@ In development, browser API calls use relative same-origin paths. Password-reset
 - Variable: `DEV_ALLOWED_ORIGINS`
 - Exact local value: `DEV_ALLOWED_ORIGINS="jys.com"`
 - Multiple aliases: comma-separated hostnames, for example `DEV_ALLOWED_ORIGINS="jys.com,shop.test"`
+- LAN phone example: `DEV_ALLOWED_ORIGINS="jys.com,192.168.1.50"`, replacing the sample IP with the current development-machine IPv4 address
+- Temporary tunnel example: `DEV_ALLOWED_ORIGINS="jys.com,example-tunnel.ngrok-free.app"`, replacing the sample with the exact issued hostname
 - Format restriction: hostnames only; do not include `http://`, a port, a path, or a production origin.
+- Source-code rule: do not add LAN IPs or temporary tunnel hostnames to `src/lib/dev-origins.ts`; they are machine-specific configuration and must remain in `.env`.
 - Required action after changing it: stop and restart `npm.cmd run dev`; `next.config.ts` is read at server startup.
 - English test URL: `http://jys.com:3000/en/profile`
 - Arabic test URL: `http://jys.com:3000/ar/profile`
@@ -180,7 +197,7 @@ These values are database-managed and should be changed through **Admin → Sett
 | Phone number | Admin → Settings → Contact | site setting | No |
 | Contact email | Admin → Settings → Contact | site setting | No |
 | Currency | Admin → Settings → Commerce | ISO 4217 code; default `ILS` | No; no conversion |
-| Delivery fees | Admin → Locations | decimal per city/area | No |
+| Delivery-provider charge | Not configured in JYS | Determined and collected separately by the delivery provider | No |
 | Supported cities/areas | Admin → Locations | active bilingual records | No |
 | Default low-stock threshold | Admin → Settings → Inventory | positive integer | No |
 | Terms | Admin → Content → Terms | Arabic and English rich text/plain content | No |
@@ -270,7 +287,7 @@ No payment gateway, delivery-company API, analytics tracker, WhatsApp integratio
 | Upload size | `.env` → `MAX_IMAGE_SIZE_MB` | Yes | `5` | Confirm operational limit | Before launch |
 | Shop details | Admin → Settings | Yes | Seeded examples | Enter real location, hours, phone, email | Before customer launch |
 | Currency | Admin → Settings → Commerce | Yes | `ILS` | Confirm; no currency conversion exists | Before pricing products |
-| Cities/areas/fees | Admin → Locations | Yes for delivery | Seeded Palestinian examples | Verify coverage, activation, and exact fees | Before taking delivery orders |
+| Delivery cities/areas | Admin → Locations | Yes for delivery | Seeded Palestinian examples | Verify destination coverage, bilingual names, ordering, and activation | Before taking delivery orders |
 | Policies | Admin → Content | Yes | Bilingual example policies | Obtain business/legal review and publish approved Arabic/English text | Before customer launch |
 | Product/catalog data | Admin → Products/Categories | Yes | Demonstration data | Replace with real SKU, stock, prices, variants, copy, and images | Before customer launch |
 | Temporary logo | `src/components/storefront/brand-mark.tsx` | Optional replacement | Text `JYS` | Replace with final accessible brand mark | When brand assets are approved |
@@ -294,14 +311,18 @@ npm.cmd run db:seed
 npm.cmd run lint
 npm.cmd run typecheck
 npm.cmd test
+npx.cmd playwright install chromium webkit firefox
 npm.cmd run test:e2e
 npm.cmd run test:e2e:db
 npm.cmd run test:e2e:hosts
+npm.cmd run test:e2e:responsive
 npm.cmd run build
 npm.cmd audit --audit-level=high
 npm.cmd run dev
 ```
 
-`npm.cmd run test:e2e` uses the database-independent demo catalog for desktop/mobile storefront coverage. `npm.cmd run test:e2e:db` requires a migrated, seeded disposable/local PostgreSQL database and runs the serial customer/admin mutation journey plus mobile admin reachability.
+`npm.cmd run test:e2e` uses the database-independent demo catalog for desktop/mobile storefront and bilingual sale-price propagation. `npm.cmd run test:e2e:db` requires a migrated, seeded disposable/local PostgreSQL database and runs the serial customer/admin mutation journey plus mobile admin reachability. It proves category create/edit/archive/restore, city/area create/edit, real PNG upload/reorder/removal and file cleanup, sale creation by price and percentage, invalid direct-request rejection, enable/disable behavior, changed-price cart acknowledgment, sale-expiry reconciliation, stale-checkout rejection, and historical order-price preservation. It also proves eligible payment updates, Delivered/Cancelled payment locks, direct-request rejection, and stale-page rejection against the latest PostgreSQL state. `npm.cmd run test:e2e:responsive` uses `playwright.responsive.config.ts` and `e2e/responsive.spec.ts` for the complete 26-size raw matrix plus representative iOS, Android, and Chromium/WebKit tablet projects. The opt-in Gecko project is enabled with `$env:E2E_ENABLE_FIREFOX='true'`; on this Windows runner Playwright failed before creating a page in both headed and headless modes, so it is not part of the supported default gate. Screenshots and failure artifacts are written below `test-results/` and the HTML report below `playwright-report/`; both are ignored development outputs.
 
-Then verify both `/en` and `/ar`, `/en/categories` and `/ar/categories`, registration/login, cart stock limits and focus refresh, wishlist persistence/out-of-stock state, delivery and pickup checkout, ownership-protected order detail, admin denial for customers, product creation, inventory correction, concurrent/idempotent order stock behavior, policy editing, reports, CSV download cleanup, mobile navigation, keyboard focus, and print order output.
+Then verify both `/en` and `/ar`, `/en/categories` and `/ar/categories`, registration/login, the localized account greeting, responsive addresses, cart stock limits and focus refresh, wishlist persistence/out-of-stock state, delivery and pickup checkout, ownership-protected order detail, admin denial for customers, product creation, inventory correction, final-order payment locking, concurrent/idempotent order stock behavior, policy editing, reports, CSV download cleanup, mobile navigation, keyboard focus, and print order output.
+
+Physical-device verification is a manual release step because it cannot be performed by the repository runner. On one current iPhone in Safari and one current Android phone in Chrome, connect to the development machine over the LAN (run the server on an address reachable by the devices and use the machine's LAN IP or local DNS), then repeat the English and Arabic header/menu, login, profile, addresses, cart, and checkout checks in portrait and landscape. Do not expect the Windows-only `127.0.0.1 jys.com` hosts entry to resolve from another device; add equivalent local DNS/hosts configuration on that device only if the alias itself must be tested. Confirm notch/home-indicator safe areas, keyboard scrolling, rotation, menu close/body-scroll restoration, and the absence of horizontal document scrolling.

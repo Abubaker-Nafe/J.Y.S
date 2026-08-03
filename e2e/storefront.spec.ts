@@ -3,11 +3,17 @@ import { expect, test, type Page } from "@playwright/test";
 async function gotoHydrated(page: Page, url: string) {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await expect(page.locator("main")).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-jys-hydrated", "true", { timeout: 30_000 });
+  await expect(page.locator("html")).not.toHaveAttribute("data-jys-session-status", "loading", { timeout: 30_000 });
+  await page.waitForLoadState("load");
 }
 
 async function reloadHydrated(page: Page) {
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.locator("main")).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-jys-hydrated", "true", { timeout: 30_000 });
+  await expect(page.locator("html")).not.toHaveAttribute("data-jys-session-status", "loading", { timeout: 30_000 });
+  await page.waitForLoadState("load");
 }
 
 async function revealCatalogFilters(page: Page) {
@@ -30,11 +36,6 @@ async function revealLanguageSwitcher(page: Page, locale: "ar" | "en") {
 }
 
 test.describe("database-free demo storefront", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/en", { waitUntil: "domcontentloaded" });
-    await page.evaluate(() => window.localStorage.clear());
-  });
-
   test("browses, searches, filters, sorts, and paginates the demo catalogue", async ({ page }) => {
     await gotoHydrated(page, "/en/products");
 
@@ -76,8 +77,22 @@ test.describe("database-free demo storefront", () => {
     await expect(page.getByText("1 / 2", { exact: true })).toBeVisible();
   });
 
+  test("uses immutable product IDs for cards and bilingual product routes", async ({ page }) => {
+    await gotoHydrated(page, "/en/products");
+    const productLink = page.getByRole("heading", { name: "Forge Pro Clipper" }).getByRole("link");
+    await expect(productLink).toHaveAttribute("href", "/en/product/p-clipper");
+    await productLink.click();
+    await expect(page).toHaveURL(/\/en\/product\/p-clipper$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Forge Pro Clipper" })).toBeVisible();
+
+    await gotoHydrated(page, "/ar/product/p-clipper");
+    await expect(page.getByRole("heading", { level: 1, name: "ماكينة فورج برو" })).toBeVisible();
+    await gotoHydrated(page, "/en/product/not-a-product-id");
+    await expect(page.getByRole("heading", { level: 1, name: "That page is not on the shelf" })).toBeVisible();
+  });
+
   test("enforces variation stock as quantity changes and persists the cart locally", async ({ page }) => {
-    await gotoHydrated(page, "/en/product/forge-pro-clipper");
+    await gotoHydrated(page, "/en/product/p-clipper");
 
     await expect(page.getByRole("heading", { level: 1, name: "Forge Pro Clipper" })).toBeVisible();
     const silver = page.getByRole("radio", { name: /Steel silver/ });
@@ -101,6 +116,7 @@ test.describe("database-free demo storefront", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Your cart" })).toBeVisible();
     await expect(page.getByText("Steel silver", { exact: true })).toBeVisible();
     await expect(page.locator("output")).toHaveText("3");
+    await expect(page.getByRole("heading", { name: "Forge Pro Clipper" }).getByRole("link")).toHaveAttribute("href", "/en/product/p-clipper");
 
     await page.getByRole("button", { name: "Decrease Forge Pro Clipper" }).click();
     await expect(page.locator("output")).toHaveText("2");
@@ -128,6 +144,7 @@ test.describe("database-free demo storefront", () => {
 
     await expect(page.getByRole("heading", { level: 1, name: "Saved products" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Cedar Beard Oil" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Cedar Beard Oil" }).getByRole("link")).toHaveAttribute("href", "/en/product/p-oil");
     await page.locator("article").filter({ hasText: "Cedar Beard Oil" }).locator('button[aria-pressed="true"]').click();
     await expect(page.getByRole("heading", { name: "Nothing saved yet" })).toBeVisible();
     await expect(page.locator("header").getByRole("link", { name: "Wishlist", exact: true })).toBeVisible();
@@ -165,12 +182,14 @@ test.describe("database-free demo storefront", () => {
     await expect(mobileMenu.getByRole("link", { name: "Shop all", exact: true })).toBeVisible();
     await mobileMenu.getByRole("link", { name: "All categories", exact: true }).click();
     await expect(page).toHaveURL(/\/en\/categories$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Browse categories" })).toBeVisible();
 
     await gotoHydrated(page, "/en");
     await page.getByLabel("Open menu").click();
     mobileMenu = page.locator("header details[open]");
     await mobileMenu.getByRole("link", { name: "Shop all", exact: true }).click();
     await expect(page).toHaveURL(/\/en\/products$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Professional supplies" })).toBeVisible();
 
     await page.getByLabel("Open menu").click();
     mobileMenu = page.locator("header details[open]");
@@ -259,7 +278,7 @@ test.describe("database-free demo storefront", () => {
               unitPrice: 20,
               availableStock,
               isAvailable: availableStock > 0,
-              product: { slug: "mock-product", nameAr: "منتج تجريبي", nameEn: "Mock product" },
+              product: { nameAr: "منتج تجريبي", nameEn: "Mock product" },
             }],
           },
         }),
@@ -276,11 +295,41 @@ test.describe("database-free demo storefront", () => {
     availableStock = 0;
     await page.waitForTimeout(4_100);
     const requestsBeforeFocus = cartGets;
-    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(async () => {
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    }).toPass({ timeout: 10_000 });
     await expect(page.getByText("Currently unavailable — remove this item to continue.")).toBeVisible();
     await expect(page.locator('[aria-disabled="true"]').filter({ hasText: "Checkout" })).toBeVisible();
     expect(cartGets).toBe(requestsBeforeFocus + 1);
     await page.waitForTimeout(500);
     expect(cartGets).toBe(requestsBeforeFocus + 1);
+  });
+
+  test("keeps sale pricing consistent across discovery, product, wishlist, cart, and structured data", async ({ page }) => {
+    await gotoHydrated(page, "/en/on-sale");
+    await expect(page.getByRole("heading", { level: 1, name: "On sale" })).toBeVisible();
+    await expect(page.getByText("4 products", { exact: true })).toBeVisible();
+    await expect(page.locator("main article del").first()).toBeVisible();
+    await expect(page.getByText(/% off/).first()).toBeVisible();
+    await revealCatalogFilters(page);
+    await expect(page.getByRole("combobox", { name: "Sort by" })).toHaveValue("discount");
+
+    await gotoHydrated(page, "/en/product/p-clipper");
+    await expect(page.locator("main del").first()).toBeVisible();
+    const structuredData = await page.locator('script[type="application/ld+json"]').textContent();
+    expect(JSON.parse(structuredData ?? "{}").offers.price).toBe("231.20");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.getByRole("button", { name: "Add to cart", exact: true }).click();
+
+    await gotoHydrated(page, "/en/cart");
+    await expect(page.getByRole("heading", { name: "Forge Pro Clipper" })).toBeVisible();
+    await expect(page.locator("main del")).toContainText("289");
+    await gotoHydrated(page, "/en/wishlist");
+    await expect(page.getByRole("heading", { name: "Forge Pro Clipper" })).toBeVisible();
+    await expect(page.locator("main article del")).toBeVisible();
+
+    await gotoHydrated(page, "/ar/on-sale");
+    await expect(page.locator("main article").first().getByText(/خصم/)).toBeVisible();
+    await expect(page.locator("main article del").first()).toBeVisible();
   });
 });

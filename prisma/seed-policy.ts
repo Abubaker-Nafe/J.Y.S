@@ -47,7 +47,6 @@ export function assertSafeSeedCredentials(input: SeedCredentialPolicyInput) {
 
 interface SeedProductMetadata {
   categoryId: string;
-  slug: string;
   nameAr: string;
   nameEn: string;
   descriptionAr: string;
@@ -61,7 +60,6 @@ interface SeedProductMetadata {
 export function existingSeedProductUpdate(product: SeedProductMetadata) {
   return {
     categoryId: product.categoryId,
-    slug: product.slug,
     nameAr: product.nameAr,
     nameEn: product.nameEn,
     descriptionAr: product.descriptionAr,

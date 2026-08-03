@@ -8,7 +8,6 @@ const decimalMoneySchema = z
 export const productInputSchema = z
   .object({
     categoryId: z.string().min(1).max(64),
-    slug: z.string().trim().min(2).max(160).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
     sku: z.string().trim().min(2).max(80).regex(/^[A-Za-z0-9._-]+$/),
     nameAr: z.string().trim().min(2).max(200),
     nameEn: z.string().trim().min(2).max(200),

@@ -2,6 +2,7 @@ import { adminActor, adminOk, handleAdminError, parseAdminId, parseAdminJson } f
 import { setProductArchived, updateProduct } from "@/lib/admin/mutations";
 import { getProduct } from "@/lib/admin/repository";
 import { productMutationSchema } from "@/lib/admin/schemas";
+import { revalidatePath } from "next/cache";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -19,7 +20,9 @@ export async function PATCH(request: Request, context: Context) {
     const actor = await adminActor(request);
     const id = parseAdminId((await context.params).id);
     const input = await parseAdminJson(request, productMutationSchema);
-    return adminOk(await updateProduct(id, input, actor.id), { message: "Product updated." });
+    const product = await updateProduct(id, input, actor.id);
+    revalidatePath("/", "layout");
+    return adminOk(product, { message: "Product updated." });
   } catch (error) { return handleAdminError(error); }
 }
 
@@ -27,6 +30,8 @@ export async function DELETE(request: Request, context: Context) {
   try {
     const actor = await adminActor(request);
     const id = parseAdminId((await context.params).id);
-    return adminOk(await setProductArchived(id, true, actor.id), { message: "Product archived." });
+    const product = await setProductArchived(id, true, actor.id);
+    revalidatePath("/", "layout");
+    return adminOk(product, { message: "Product archived." });
   } catch (error) { return handleAdminError(error); }
 }

@@ -2,11 +2,13 @@
 
 import { ArrowDown, ArrowUp, ImagePlus, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useRef, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { adminMessages } from "@/lib/admin/i18n";
 import type { AdminCategory, AdminLocale, AdminProductDetail } from "@/lib/admin/types";
+import { percentageFromSalePrice, salePriceFromPercentage } from "@/lib/domain/pricing";
 import { adminErrorText, adminFetch, MutationMessage, type ApiResult } from "./MutationFeedback";
 import styles from "./admin.module.css";
+import { Tooltip } from "@/components/ui/tooltip";
 
 type DraftImage = AdminProductDetail["images"][number];
 type DraftVariant = AdminProductDetail["variants"][number];
@@ -14,12 +16,19 @@ type DraftVariant = AdminProductDetail["variants"][number];
 const emptyProduct: AdminProductDetail = {
   id: "",
   sku: "",
-  slug: "",
   nameAr: "",
   nameEn: "",
   descriptionAr: "",
   descriptionEn: "",
   price: 0,
+  effectivePrice: 0,
+  saleEnabled: false,
+  salePrice: null,
+  saleStartsAt: null,
+  saleEndsAt: null,
+  saleUpdatedAt: null,
+  saleStatus: "DISABLED",
+  discountPercentage: 0,
   stock: 0,
   lowStockThreshold: 5,
   status: "ACTIVE",
@@ -44,6 +53,13 @@ export function ProductForm({ locale, product: suppliedProduct, categories, defa
   const fileInput = useRef<HTMLInputElement>(null);
   const [images, setImages] = useState<DraftImage[]>(product.images);
   const [variants, setVariants] = useState<DraftVariant[]>(product.variants);
+  const [normalPrice, setNormalPrice] = useState(product.price);
+  const [saleEnabled, setSaleEnabled] = useState(product.saleEnabled);
+  const [saleInputMethod, setSaleInputMethod] = useState<"PRICE" | "PERCENTAGE">("PRICE");
+  const [salePrice, setSalePrice] = useState<number | null>(product.salePrice);
+  const [salePercentage, setSalePercentage] = useState<number | null>(product.salePrice ? percentageFromSalePrice(product.price, product.salePrice) : null);
+  const [saleStartsAt, setSaleStartsAt] = useState(toDatetimeLocal(product.saleStartsAt));
+  const [saleEndsAt, setSaleEndsAt] = useState(toDatetimeLocal(product.saleEndsAt));
   const [uploading, setUploading] = useState(false);
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<ApiResult | null>(null);
@@ -52,6 +68,16 @@ export function ProductForm({ locale, product: suppliedProduct, categories, defa
   const title = locale === "ar" ? (editing ? "تعديل المنتج" : "إضافة منتج") : editing ? "Edit product" : "Create product";
 
   const normalizedImages = useMemo(() => images.map((image, index) => ({ ...image, position: index, primary: index === 0 })), [images]);
+  const preview = useMemo(() => {
+    if (!saleEnabled || normalPrice <= 0) return null;
+    try {
+      const resolvedSalePrice = saleInputMethod === "PERCENTAGE" ? Number(salePriceFromPercentage(normalPrice, salePercentage ?? 0)) : salePrice;
+      if (resolvedSalePrice === null || resolvedSalePrice <= 0 || resolvedSalePrice >= normalPrice) return null;
+      return { salePrice: resolvedSalePrice, percentage: percentageFromSalePrice(normalPrice, resolvedSalePrice) };
+    } catch {
+      return null;
+    }
+  }, [normalPrice, saleEnabled, saleInputMethod, salePercentage, salePrice]);
 
   function addVariant() {
     setVariants((current) => [...current, { sku: "", labelAr: "", labelEn: "", priceOverride: null, stock: 0, available: true, active: true }]);
@@ -96,12 +122,17 @@ export function ProductForm({ locale, product: suppliedProduct, categories, defa
     const form = new FormData(event.currentTarget);
     const payload = {
       sku: String(form.get("sku") ?? ""),
-      slug: String(form.get("slug") ?? ""),
       nameAr: String(form.get("nameAr") ?? ""),
       nameEn: String(form.get("nameEn") ?? ""),
       descriptionAr: String(form.get("descriptionAr") ?? ""),
       descriptionEn: String(form.get("descriptionEn") ?? ""),
       price: Number(form.get("price")),
+      saleEnabled,
+      saleInputMethod,
+      salePrice: saleInputMethod === "PRICE" ? salePrice : null,
+      salePercentage: saleInputMethod === "PERCENTAGE" ? salePercentage : null,
+      saleStartsAt: saleEnabled && saleStartsAt ? new Date(saleStartsAt).toISOString() : null,
+      saleEndsAt: saleEnabled && saleEndsAt ? new Date(saleEndsAt).toISOString() : null,
       stock: Number(form.get("stock")),
       lowStockThreshold: Number(form.get("lowStockThreshold")),
       categoryId: String(form.get("categoryId") ?? ""),
@@ -135,7 +166,6 @@ export function ProductForm({ locale, product: suppliedProduct, categories, defa
           <Field name="nameAr" label="الاسم بالعربية" defaultValue={product.nameAr} required error={errorFor("nameAr")} dir="rtl" />
           <Field name="nameEn" label="English name" defaultValue={product.nameEn} required error={errorFor("nameEn")} dir="ltr" />
           <Field name="sku" label={locale === "ar" ? "رمز المخزون SKU" : "SKU"} defaultValue={product.sku} required error={errorFor("sku")} dir="ltr" />
-          <Field name="slug" label={locale === "ar" ? "الرابط المختصر" : "URL slug"} defaultValue={product.slug} required error={errorFor("slug")} dir="ltr" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" />
           <div className={styles.field}>
             <label htmlFor="categoryId">{locale === "ar" ? "التصنيف" : "Category"}</label>
             <select id="categoryId" name="categoryId" className={styles.select} defaultValue={product.categoryId} required aria-invalid={Boolean(errorFor("categoryId"))} aria-describedby={errorFor("categoryId") ? "categoryId-error" : undefined}>
@@ -144,7 +174,7 @@ export function ProductForm({ locale, product: suppliedProduct, categories, defa
             </select>
             {errorFor("categoryId") ? <span id="categoryId-error" className={styles.errorText}>{errorFor("categoryId")}</span> : null}
           </div>
-          <Field name="price" type="number" label={locale === "ar" ? "السعر" : "Base price"} defaultValue={String(product.price)} min="0" step="0.01" required error={errorFor("price")} />
+          <Field name="price" type="number" label={locale === "ar" ? "السعر العادي" : "Normal price"} defaultValue={String(product.price)} min="0.01" step="0.01" required error={errorFor("price")} onChange={(event: ChangeEvent<HTMLInputElement>) => setNormalPrice(Number(event.target.value))} />
           <Field name="stock" type="number" label={locale === "ar" ? "مخزون المنتج الأساسي" : "Base product stock"} defaultValue={String(product.stock)} min="0" step="1" required readOnly={editing} aria-describedby={editing ? "stock-edit-note" : undefined} error={errorFor("stock")} />
           <Field name="lowStockThreshold" type="number" label={locale === "ar" ? "حد انخفاض المخزون" : "Low-stock threshold"} defaultValue={String(product.lowStockThreshold)} min="0" step="1" required error={errorFor("lowStockThreshold")} />
         </div>
@@ -158,6 +188,43 @@ export function ProductForm({ locale, product: suppliedProduct, categories, defa
           <label className={styles.checkbox}><input name="active" type="checkbox" defaultChecked={product.active} />{locale === "ar" ? "نشط وظاهر في المتجر" : "Active and visible in storefront"}</label>
           <label className={styles.checkbox}><input name="featured" type="checkbox" defaultChecked={product.featured} />{locale === "ar" ? "منتج مميز" : "Featured product"}</label>
         </div>
+      </section>
+
+      <section className={styles.card} aria-labelledby="sale-heading">
+        <div className={styles.cardHeader}>
+          <div>
+            <h2 id="sale-heading">{locale === "ar" ? "العرض والتخفيض" : "Sale and discount"}</h2>
+            <p>{locale === "ar" ? "حدد سعراً مخفضاً أو نسبة خصم. يطبق نفس معدل الخصم على أسعار الخيارات تلقائياً." : "Set a sale price or a discount percentage. The same discount ratio is applied to variant prices automatically."}</p>
+          </div>
+          <label className={styles.checkbox}><input type="checkbox" checked={saleEnabled} onChange={(event) => setSaleEnabled(event.target.checked)} />{locale === "ar" ? "تفعيل العرض" : "Enable sale"}</label>
+        </div>
+        {saleEnabled ? <div className={styles.stack}>
+          <div className={styles.formGrid}>
+            <div className={styles.field}>
+              <label htmlFor="saleInputMethod">{locale === "ar" ? "طريقة التخفيض" : "Discount input"}</label>
+              <select id="saleInputMethod" className={styles.select} value={saleInputMethod} onChange={(event) => setSaleInputMethod(event.target.value as "PRICE" | "PERCENTAGE")}>
+                <option value="PRICE">{locale === "ar" ? "سعر مخفض" : "Sale price"}</option>
+                <option value="PERCENTAGE">{locale === "ar" ? "نسبة مئوية" : "Percentage"}</option>
+              </select>
+            </div>
+            {saleInputMethod === "PRICE" ? <div className={styles.field}>
+              <label htmlFor="salePrice">{locale === "ar" ? "السعر المخفض" : "Sale price"}</label>
+              <input id="salePrice" name="salePrice" className={styles.input} type="number" min="0.01" step="0.01" required value={salePrice ?? ""} onChange={(event) => setSalePrice(event.target.value === "" ? null : Number(event.target.value))} aria-invalid={Boolean(errorFor("salePrice"))} aria-describedby={errorFor("salePrice") ? "salePrice-error" : undefined} />
+              {errorFor("salePrice") ? <span id="salePrice-error" className={styles.errorText}>{errorFor("salePrice")}</span> : null}
+            </div> : <div className={styles.field}>
+              <label htmlFor="salePercentage">{locale === "ar" ? "نسبة الخصم %" : "Discount percentage %"}</label>
+              <input id="salePercentage" name="salePercentage" className={styles.input} type="number" min="0.01" max="99.99" step="0.01" required value={salePercentage ?? ""} onChange={(event) => setSalePercentage(event.target.value === "" ? null : Number(event.target.value))} aria-invalid={Boolean(errorFor("salePercentage"))} aria-describedby={errorFor("salePercentage") ? "salePercentage-error" : undefined} />
+              {errorFor("salePercentage") ? <span id="salePercentage-error" className={styles.errorText}>{errorFor("salePercentage")}</span> : null}
+            </div>}
+            <div className={styles.field}><label htmlFor="saleStartsAt">{locale === "ar" ? "يبدأ في (اختياري)" : "Starts at (optional)"}</label><input id="saleStartsAt" className={styles.input} type="datetime-local" value={saleStartsAt} onChange={(event) => setSaleStartsAt(event.target.value)} /></div>
+            <div className={styles.field}><label htmlFor="saleEndsAt">{locale === "ar" ? "ينتهي في (اختياري)" : "Ends at (optional)"}</label><input id="saleEndsAt" className={styles.input} type="datetime-local" value={saleEndsAt} onChange={(event) => setSaleEndsAt(event.target.value)} aria-invalid={Boolean(errorFor("saleEndsAt"))} aria-describedby={errorFor("saleEndsAt") ? "saleEndsAt-error" : undefined} />{errorFor("saleEndsAt") ? <span id="saleEndsAt-error" className={styles.errorText}>{errorFor("saleEndsAt")}</span> : null}</div>
+          </div>
+          <div className={styles.infoBanner} role="status" aria-live="polite">
+            {preview ? <>{locale === "ar" ? "المعاينة:" : "Preview:"} <del>{normalPrice.toFixed(2)}</del> <strong>{preview.salePrice.toFixed(2)}</strong> · {preview.percentage}% {locale === "ar" ? "خصم" : "off"}</> : (locale === "ar" ? "أدخل تخفيضاً صالحاً أقل من السعر العادي لمعاينته." : "Enter a valid discount below the normal price to preview it.")}
+            {editing ? <small className={styles.muted}>{locale === "ar" ? "حالة العرض الحالية: " : "Current sale status: "}<strong>{product.saleStatus}</strong></small> : null}
+            {editing && product.saleUpdatedAt ? <small className={styles.muted}>{locale === "ar" ? " آخر تحديث للعرض: " : " Sale last updated: "}{new Intl.DateTimeFormat(locale === "ar" ? "ar-PS" : "en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(product.saleUpdatedAt))}</small> : null}
+          </div>
+        </div> : <p className={styles.infoBanner}>{locale === "ar" ? "السعر العادي هو السعر الفعّال حالياً. فعّل العرض لإضافة تخفيض." : "The normal price is currently effective. Enable the sale to add a discount."}</p>}
       </section>
 
       <section className={styles.card} aria-labelledby="images-heading">
@@ -177,9 +244,9 @@ export function ProductForm({ locale, product: suppliedProduct, categories, defa
                   <img className={styles.thumb} src={image.url} alt="" />
                   <strong>{index === 0 ? (locale === "ar" ? "الصورة الأساسية" : "Primary image") : `${locale === "ar" ? "صورة" : "Image"} ${index + 1}`}</strong>
                   <div className={styles.tableActions}>
-                    <button className={`${styles.buttonSecondary} ${styles.iconButton}`} type="button" disabled={index === 0} aria-label={locale === "ar" ? "تحريك الصورة لأعلى" : "Move image up"} onClick={() => moveImage(index, -1)}><ArrowUp size={16} /></button>
-                    <button className={`${styles.buttonSecondary} ${styles.iconButton}`} type="button" disabled={index === images.length - 1} aria-label={locale === "ar" ? "تحريك الصورة لأسفل" : "Move image down"} onClick={() => moveImage(index, 1)}><ArrowDown size={16} /></button>
-                    <button className={`${styles.buttonDanger} ${styles.iconButton}`} type="button" aria-label={locale === "ar" ? "إزالة الصورة" : "Remove image"} onClick={() => setImages((current) => current.filter((_, position) => position !== index))}><Trash2 size={16} /></button>
+                    <Tooltip label={locale === "ar" ? "تحريك الصورة لأعلى" : "Move image up"}><button className={`${styles.buttonSecondary} ${styles.iconButton}`} type="button" disabled={index === 0} aria-label={locale === "ar" ? "تحريك الصورة لأعلى" : "Move image up"} onClick={() => moveImage(index, -1)}><ArrowUp size={16} /></button></Tooltip>
+                    <Tooltip label={locale === "ar" ? "تحريك الصورة لأسفل" : "Move image down"}><button className={`${styles.buttonSecondary} ${styles.iconButton}`} type="button" disabled={index === images.length - 1} aria-label={locale === "ar" ? "تحريك الصورة لأسفل" : "Move image down"} onClick={() => moveImage(index, 1)}><ArrowDown size={16} /></button></Tooltip>
+                    <Tooltip label={locale === "ar" ? "إزالة الصورة" : "Remove image"}><button className={`${styles.buttonDanger} ${styles.iconButton}`} type="button" aria-label={locale === "ar" ? "إزالة الصورة" : "Remove image"} onClick={() => setImages((current) => current.filter((_, position) => position !== index))}><Trash2 size={16} /></button></Tooltip>
                   </div>
                 </div>
                 <div className={`${styles.formGrid} ${styles.sectionGap}`}>
@@ -247,4 +314,12 @@ function TextArea({ name, label, defaultValue, error, ...props }: { name: string
       {error ? <span id={errorId} className={styles.errorText}>{error}</span> : null}
     </div>
   );
+}
+
+function toDatetimeLocal(value: string | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }

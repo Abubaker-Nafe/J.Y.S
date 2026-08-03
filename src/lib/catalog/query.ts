@@ -1,5 +1,5 @@
 export const STOREFRONT_PAGE_SIZE = 8;
-export type StorefrontSort = "featured" | "newest" | "low" | "high";
+export type StorefrontSort = "featured" | "newest" | "low" | "high" | "discount" | "sale-newest";
 
 export interface CatalogUrlState {
   page: number;
@@ -16,7 +16,7 @@ function first(value: QueryValue): string {
 }
 
 export function normalizeCatalogSort(value: string): StorefrontSort {
-  if (value === "newest" || value === "low" || value === "high") return value;
+  if (value === "newest" || value === "low" || value === "high" || value === "discount" || value === "sale-newest") return value;
   if (value === "price-asc") return "low";
   if (value === "price-desc") return "high";
   return "featured";

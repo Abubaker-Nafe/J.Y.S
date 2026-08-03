@@ -22,11 +22,7 @@ export function minorToMoney(minor: number): string {
 
 export function calculateOrderTotals(
   lines: ReadonlyArray<{ unitPriceMinor: number; quantity: number }>,
-  deliveryFeeMinor: number,
-): { subtotalMinor: number; deliveryFeeMinor: number; totalMinor: number } {
-  if (!Number.isSafeInteger(deliveryFeeMinor) || deliveryFeeMinor < 0) {
-    throw new Error("Delivery fee cannot be negative");
-  }
+): { subtotalMinor: number; totalMinor: number } {
   const subtotalMinor = lines.reduce((sum, line) => {
     if (!Number.isSafeInteger(line.unitPriceMinor) || line.unitPriceMinor < 0) {
       throw new Error("Unit price cannot be negative");
@@ -42,8 +38,7 @@ export function calculateOrderTotals(
   }, 0);
   return {
     subtotalMinor,
-    deliveryFeeMinor,
-    totalMinor: subtotalMinor + deliveryFeeMinor,
+    totalMinor: subtotalMinor,
   };
 }
 

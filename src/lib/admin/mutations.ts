@@ -3,7 +3,9 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { createManualInventoryAdjustment, transitionOrderStatus } from "@/lib/domain/order-service";
-import { assertPaymentStatusTransition, type DomainPaymentStatus } from "@/lib/domain/payment";
+import { salePriceFromPercentage } from "@/lib/domain/pricing";
+import { assertPaymentStatusEditable, assertPaymentStatusTransition, isPaymentStatusLocked, PAYMENT_STATUS_LOCKED_MESSAGE, type DomainPaymentStatus } from "@/lib/domain/payment";
+import { getImageStorage } from "@/lib/storage";
 import { AdminDomainError } from "./api";
 import { areaMoveConflictsWithAddresses } from "./location-rules";
 import type {
@@ -20,15 +22,37 @@ async function audit(tx: Prisma.TransactionClient, actorId: string, action: stri
   await tx.auditLog.create({ data: { actorId, action, entityType, entityId, ...(metadata === undefined ? {} : { metadata }) } });
 }
 
-function productMetadataData(input: ProductMutation) {
+function normalizedSaleData(input: ProductMutation) {
+  if (!input.saleEnabled) return { isOnSale: false, salePrice: null, saleStartsAt: null, saleEndsAt: null };
+  const salePrice = input.saleInputMethod === "PERCENTAGE"
+    ? salePriceFromPercentage(input.price, input.salePercentage ?? 0)
+    : input.salePrice;
+  return {
+    isOnSale: true,
+    salePrice,
+    saleStartsAt: input.saleStartsAt ? new Date(input.saleStartsAt) : null,
+    saleEndsAt: input.saleEndsAt ? new Date(input.saleEndsAt) : null,
+  };
+}
+
+type CurrentSale = { isOnSale: boolean; salePrice: Prisma.Decimal | null; saleStartsAt: Date | null; saleEndsAt: Date | null; saleUpdatedAt: Date | null };
+
+function productMetadataData(input: ProductMutation, current?: CurrentSale) {
+  const sale = normalizedSaleData(input);
+  const changed = !current
+    || current.isOnSale !== sale.isOnSale
+    || (current.salePrice?.toString() ?? null) !== (sale.salePrice === null ? null : String(sale.salePrice))
+    || current.saleStartsAt?.toISOString() !== sale.saleStartsAt?.toISOString()
+    || current.saleEndsAt?.toISOString() !== sale.saleEndsAt?.toISOString();
   return {
     sku: input.sku,
-    slug: input.slug,
     nameAr: input.nameAr,
     nameEn: input.nameEn,
     descriptionAr: input.descriptionAr,
     descriptionEn: input.descriptionEn,
     price: input.price,
+    ...sale,
+    saleUpdatedAt: changed ? new Date() : current?.saleUpdatedAt ?? null,
     lowStockThreshold: input.lowStockThreshold,
     categoryId: input.categoryId,
     status: input.active ? "ACTIVE" as const : "HIDDEN" as const,
@@ -93,8 +117,8 @@ export async function createProduct(input: ProductMutation, actorId: string) {
 }
 
 export async function updateProduct(id: string, input: ProductMutation, actorId: string) {
-  return db.$transaction(async (tx) => {
-    const current = await tx.product.findUnique({ where: { id }, select: { id: true, archivedAt: true, variants: { select: { id: true } } } });
+  const result = await db.$transaction(async (tx) => {
+    const current = await tx.product.findUnique({ where: { id }, select: { id: true, archivedAt: true, isOnSale: true, salePrice: true, saleStartsAt: true, saleEndsAt: true, saleUpdatedAt: true, variants: { select: { id: true } }, images: { select: { storageKey: true } } } });
     if (!current) throw new AdminDomainError("Product not found.", 404);
     if (current.archivedAt) throw new AdminDomainError("Restore this product before editing it.", 409);
     const requestedVariantIds = input.variants.flatMap((variant) => variant.id ? [variant.id] : []);
@@ -115,10 +139,35 @@ export async function updateProduct(id: string, input: ProductMutation, actorId:
         if (variant.stock > 0) await tx.inventoryAdjustment.create({ data: { productId: id, variantId: created.id, type: "INITIAL_STOCK", quantityDelta: variant.stock, previousStock: 0, newStock: variant.stock, reason: "Initial stock for newly created variant", createdById: actorId } });
       }
     }
-    const product = await tx.product.update({ where: { id }, data: { ...productMetadataData(input), images: { create: input.images.map(imageData) } }, select: { id: true } });
-    await audit(tx, actorId, "PRODUCT_UPDATED", "Product", id, { sku: input.sku, inventoryPreserved: true });
-    return product;
+    const product = await tx.product.update({ where: { id }, data: { ...productMetadataData(input, current), images: { create: input.images.map(imageData) } }, select: { id: true } });
+    await audit(tx, actorId, "PRODUCT_UPDATED", "Product", id, { sku: input.sku, inventoryPreserved: true, sale: normalizedSaleData(input) });
+    const retainedStorageKeys = new Set(input.images.map((image) => image.storageKey));
+    return {
+      product,
+      removedStorageKeys: current.images
+        .map((image) => image.storageKey)
+        .filter((storageKey) => !retainedStorageKeys.has(storageKey)),
+    };
   });
+
+  // External storage cannot participate in the PostgreSQL transaction. Remove
+  // superseded files only after the database commit so a failed product update
+  // can never leave an existing image record pointing at a deleted file.
+  if (result.removedStorageKeys.length) {
+    const storage = getImageStorage();
+    const cleanup = await Promise.allSettled(result.removedStorageKeys.map((storageKey) => storage.remove(storageKey)));
+    cleanup.forEach((outcome, index) => {
+      if (outcome.status === "rejected") {
+        console.error("Product image cleanup failed", {
+          productId: id,
+          storageKey: result.removedStorageKeys[index],
+          error: outcome.reason instanceof Error ? outcome.reason.message : "Unknown error",
+        });
+      }
+    });
+  }
+
+  return result.product;
 }
 
 export async function setProductArchived(id: string, archived: boolean, actorId: string) {
@@ -183,21 +232,35 @@ export async function adjustInventory(input: InventoryAdjustmentMutation, actorI
 }
 
 export async function updateOrder(id: string, input: OrderMutation, actorId: string) {
-  const order = await db.order.findUnique({ where: { id }, select: { id: true, status: true, paymentStatus: true } });
-  if (!order) throw new AdminDomainError("Order not found.", 404);
   if (input.paymentStatus) {
-    try {
-      assertPaymentStatusTransition(order.paymentStatus as DomainPaymentStatus, input.paymentStatus);
-    } catch (error) {
-      throw new AdminDomainError(error instanceof Error ? error.message : "Invalid payment status transition.", 422);
-    }
+    const nextPaymentStatus = input.paymentStatus;
     return db.$transaction(async (tx) => {
-      const changed = await tx.order.updateMany({ where: { id, paymentStatus: order.paymentStatus }, data: { paymentStatus: input.paymentStatus } });
-      if (changed.count !== 1) throw new AdminDomainError("This order changed while you were editing it. Reload and try again.", 409);
-      await audit(tx, actorId, "ORDER_PAYMENT_STATUS_UPDATED", "Order", id, { from: order.paymentStatus, to: input.paymentStatus, note: input.note ?? null });
+      const order = await tx.order.findUnique({ where: { id }, select: { id: true, status: true, paymentStatus: true } });
+      if (!order) throw new AdminDomainError("Order not found.", 404);
+      try {
+        assertPaymentStatusEditable(order.status);
+        assertPaymentStatusTransition(order.paymentStatus as DomainPaymentStatus, nextPaymentStatus);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Invalid payment status transition.";
+        throw new AdminDomainError(message, message === PAYMENT_STATUS_LOCKED_MESSAGE ? 409 : 422);
+      }
+      // Both values are part of the write predicate. A concurrent fulfillment
+      // change therefore cannot let a stale payment form update a final order.
+      const changed = await tx.order.updateMany({
+        where: { id, status: order.status, paymentStatus: order.paymentStatus },
+        data: { paymentStatus: nextPaymentStatus },
+      });
+      if (changed.count !== 1) {
+        const latest = await tx.order.findUnique({ where: { id }, select: { status: true } });
+        if (latest && isPaymentStatusLocked(latest.status)) throw new AdminDomainError(PAYMENT_STATUS_LOCKED_MESSAGE, 409);
+        throw new AdminDomainError("This order changed while you were editing it. Reload and try again.", 409);
+      }
+      await audit(tx, actorId, "ORDER_PAYMENT_STATUS_UPDATED", "Order", id, { from: order.paymentStatus, to: nextPaymentStatus, note: input.note ?? null });
       return tx.order.findUniqueOrThrow({ where: { id }, select: { id: true } });
     });
   }
+  const order = await db.order.findUnique({ where: { id }, select: { id: true, status: true } });
+  if (!order) throw new AdminDomainError("Order not found.", 404);
   if (!input.status) throw new AdminDomainError("Choose an order status.", 422);
   const updated = await transitionOrderStatus({ orderId: id, toStatus: input.status, actorId, note: input.note });
   await db.auditLog.create({ data: { actorId, action: "ORDER_STATUS_UPDATED", entityType: "Order", entityId: id, metadata: { from: order.status, to: input.status } } });
@@ -207,12 +270,12 @@ export async function updateOrder(id: string, input: OrderMutation, actorId: str
 export async function saveLocation(id: string | null, input: LocationMutation, actorId: string) {
   return db.$transaction(async (tx) => {
     if (input.kind === "city") {
-      const data = { nameAr: input.nameAr, nameEn: input.nameEn, slug: input.slug, deliveryFee: input.deliveryFee, isActive: input.active, displayOrder: input.displayOrder };
+      const data = { nameAr: input.nameAr, nameEn: input.nameEn, slug: input.slug, isActive: input.active, displayOrder: input.displayOrder };
       const city = id ? await tx.city.update({ where: { id }, data, select: { id: true } }) : await tx.city.create({ data, select: { id: true } });
       await audit(tx, actorId, id ? "CITY_UPDATED" : "CITY_CREATED", "City", city.id);
       return city;
     }
-    const data = { cityId: input.cityId, nameAr: input.nameAr, nameEn: input.nameEn, slug: input.slug, deliveryFee: input.deliveryFee, isActive: input.active, displayOrder: input.displayOrder };
+    const data = { cityId: input.cityId, nameAr: input.nameAr, nameEn: input.nameEn, slug: input.slug, isActive: input.active, displayOrder: input.displayOrder };
     if (id) {
       const existing = await tx.area.findUnique({
         where: { id },

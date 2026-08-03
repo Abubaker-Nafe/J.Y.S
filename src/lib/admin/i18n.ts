@@ -15,7 +15,7 @@ export const adminMessages = {
     inventory: "Inventory",
     orders: "Orders",
     customers: "Customers",
-    locations: "Cities & fees",
+    locations: "Cities & areas",
     reports: "Reports",
     content: "Content",
     settings: "Settings",
@@ -59,7 +59,7 @@ export const adminMessages = {
     inventory: "المخزون",
     orders: "الطلبات",
     customers: "العملاء",
-    locations: "المدن ورسوم التوصيل",
+    locations: "مدن ومناطق التوصيل",
     reports: "التقارير",
     content: "المحتوى",
     settings: "الإعدادات",
@@ -109,7 +109,7 @@ const orderStatuses = {
   READY_FOR_PICKUP: ["جاهز للاستلام", "Ready for pickup"],
   COLLECTED: ["تم الاستلام", "Collected"],
   CANCELLED: ["ملغي", "Cancelled"],
-  PENDING: ["معلق", "Pending"],
+  PENDING: ["قيد الانتظار", "Pending"],
   PAID: ["مدفوع", "Paid"],
 } satisfies Record<string, readonly [string, string]>;
 

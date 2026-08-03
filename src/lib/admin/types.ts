@@ -27,10 +27,17 @@ export type AdminDashboardData = {
 export type AdminProductSummary = {
   id: string;
   sku: string;
-  slug: string;
   nameAr: string;
   nameEn: string;
   price: number;
+  effectivePrice: number;
+  saleEnabled: boolean;
+  salePrice: number | null;
+  saleStartsAt: string | null;
+  saleEndsAt: string | null;
+  saleUpdatedAt: string | null;
+  saleStatus: "DISABLED" | "INVALID" | "SCHEDULED" | "ACTIVE" | "EXPIRED";
+  discountPercentage: number;
   stock: number;
   lowStockThreshold: number;
   status: string;
@@ -132,7 +139,6 @@ export type AdminOrderSummary = {
 
 export type AdminOrderDetail = AdminOrderSummary & {
   subtotal: number;
-  deliveryFee: number;
   cityNameAr: string | null;
   cityNameEn: string | null;
   areaNameAr: string | null;
@@ -143,6 +149,7 @@ export type AdminOrderDetail = AdminOrderSummary & {
   policyAcceptedAt: string;
   items: Array<{
     id: string;
+    productId: string | null;
     sku: string;
     productNameAr: string;
     productNameEn: string;
@@ -151,6 +158,9 @@ export type AdminOrderDetail = AdminOrderSummary & {
     unitPrice: number;
     quantity: number;
     lineTotal: number;
+    imageUrl: string | null;
+    imageAltAr: string;
+    imageAltEn: string;
   }>;
   history: Array<{
     id: string;
@@ -180,7 +190,6 @@ export type AdminCity = {
   slug: string;
   nameAr: string;
   nameEn: string;
-  fee: number;
   active: boolean;
   displayOrder: number;
   areas: Array<{
@@ -188,7 +197,6 @@ export type AdminCity = {
     slug: string;
     nameAr: string;
     nameEn: string;
-    fee: number;
     active: boolean;
     displayOrder: number;
   }>;
@@ -231,7 +239,6 @@ export type AdminReportData = {
     status: string;
     currency: string;
     subtotal: number;
-    deliveryFee: number;
     total: number;
     itemCount: number;
   }>;
@@ -251,6 +258,11 @@ export type AdminReportData = {
     categoryEn: string;
     active: boolean;
     available: boolean;
+    normalPrice: number;
+    salePrice: number | null;
+    effectivePrice: number;
+    discountPercentage: number;
+    saleStatus: "DISABLED" | "INVALID" | "SCHEDULED" | "ACTIVE" | "EXPIRED";
   }>;
   categories: Array<{
     id: string;

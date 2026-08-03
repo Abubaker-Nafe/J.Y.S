@@ -9,11 +9,13 @@ The application intentionally does **not** implement appointments, online paymen
 ## What is included
 
 - Arabic and English locale routes with RTL/LTR layout and a remembered language choice.
-- Responsive storefront: home, a bilingual category directory plus accessible desktop/mobile category navigation, search/filter/sort, product detail, variations, database-revalidated cart/wishlist, and useful empty/error/loading states.
-- Account flows: registration, login/logout, generic forgot-password response, expiring reset token, profile, addresses, and protected order history/detail.
-- Cash-only delivery and pickup checkout with server-recalculated prices, area fees, stock validation, terms acceptance, immutable order snapshots, and readable order numbers.
+- Responsive storefront: fluid 320px-to-desktop layouts, safe-area-aware header/footer, a bilingual category directory plus accessible desktop/mobile navigation, search/filter/sort, dedicated on-sale discovery, product detail, variations, database-revalidated cart/wishlist, and useful empty/error/loading states.
+- Account flows: localized authenticated-customer greeting from the stored full name, registration, login/logout, generic forgot-password response, expiring reset token, profile, responsive address management, and protected order history/detail.
+- Cash-only delivery and pickup checkout with server-recalculated product totals, delivery-address collection, stock validation, terms acceptance, immutable order snapshots, and readable order numbers. Delivery-provider charges are determined and collected separately.
 - Inventory rules: deduct once on confirmation, restore once on cancellation, transition validation, adjustment audit trail, and concurrency-safe transactions.
-- Protected admin workspace: overview, products/variants/images, categories, inventory, orders/payment/status history, customers, cities/areas/fees, reports/CSV, content, and settings.
+- Protected admin workspace: overview, products/variants/images and scheduled sales, categories, inventory, orders/payment/status history with final-order payment locking, customers, delivery cities/areas, sale-aware reports/CSV, content, and settings.
+- Server-authoritative sale pricing: a normal price plus optional validated sale price/date range, price-or-percentage admin entry, deterministic rounding, variation discount propagation, cache revalidation, stale-cart acknowledgment, and checkout-time price verification.
+- Delayed accessible tooltips for unclear icon-only storefront and admin controls, with keyboard focus, Escape dismissal, touch suppression, one-at-a-time behavior, and viewport-safe positioning.
 - Original local, unbranded placeholder artwork for the hero and sample products.
 - Security controls: password hashing, signed HttpOnly SameSite sessions, server authorization, Zod validation, rate limits, safe upload validation, ownership checks, generic auth recovery response, security headers, and no committed secrets.
 - Prisma schema, deterministic seed data, unit/integration tests, Playwright critical-flow specifications, Docker Compose, and production standalone build configuration.
@@ -40,7 +42,7 @@ The system is one modular monolith. Stock, pricing, authorization, and order sta
 | `src/components/storefront` | Store header, cards, filters, cart, forms, and customer feedback |
 | `src/components/admin` | Admin shell, forms, tables, charts, print views, and mutation feedback |
 | `src/lib/auth` | Password, sessions, password reset, and authorization |
-| `src/lib/domain` | Money, cart, delivery, order-transition, and inventory rules |
+| `src/lib/domain` | Money, sale pricing, cart, order-transition, and inventory rules |
 | `src/lib/admin` / `src/lib/reports` | Protected admin operations and report aggregation |
 | `src/lib/i18n` | Locale parsing, dictionaries, field fallback, and formatting |
 | `src/lib/email` / `src/lib/storage` | Replaceable mail and image-storage adapters |
@@ -51,7 +53,7 @@ The system is one modular monolith. Stock, pricing, authorization, and order sta
 
 ## Database entities
 
-The Prisma model covers users, customer profiles, addresses, password-reset tokens, cities, areas, categories, products, images, variants, wishlists, carts/items, product views, orders/items, status history, inventory adjustments, settings, content pages, and audit logs. Money uses PostgreSQL `Decimal`, critical lookups are indexed, historical records use restrictive relationships, and sellable records are archived instead of hard-deleted.
+The Prisma model covers users, customer profiles, addresses, password-reset tokens, cities, areas, categories, products with normal/sale pricing and optional schedules, images, variants, wishlists, carts/items, product views, orders/items, status history, inventory adjustments, settings, content pages, and audit logs. Money uses PostgreSQL `Decimal`, critical lookups are indexed, historical records use restrictive relationships, and sellable records are archived instead of hard-deleted.
 
 ## Local setup on Windows
 
@@ -103,7 +105,7 @@ npm.cmd run dev
 
 Open `http://localhost:3000`. The root redirects to the remembered locale, defaulting to English. Arabic is available at `/ar` and English at `/en`.
 
-For the optional Windows hosts-file alias `127.0.0.1 jys.com`, set `DEV_ALLOWED_ORIGINS="jys.com"` in `.env`, restart `npm.cmd run dev`, and open `http://jys.com:3000`. Keep `APP_URL` and `NEXT_PUBLIC_APP_URL` at `http://localhost:3000` for the default local origin. Browser API requests are relative and remain on whichever host you opened; authentication cookies are intentionally host-only, so sign in separately on `localhost` and `jys.com`.
+For the optional Windows hosts-file alias `127.0.0.1 jys.com`, set `DEV_ALLOWED_ORIGINS="jys.com"` in `.env`, restart `npm.cmd run dev`, and open `http://jys.com:3000`. For a phone on the same LAN, add the development machine's current IP (for example `192.168.1.50`) to the comma-separated value and open `http://192.168.1.50:3000`; the IP is configuration, never source code. For a temporary tunnel, add only its issued hostname (for example `example-tunnel.ngrok-free.app`) and restart the server. Keep `APP_URL` and `NEXT_PUBLIC_APP_URL` at `http://localhost:3000` for the default local origin. Browser API requests are relative and remain on whichever host you opened; authentication cookies are intentionally host-only, so sign in separately on each hostname.
 
 ## Development credentials
 
@@ -123,12 +125,15 @@ npm.cmd run lint
 npm.cmd run typecheck
 npm.cmd test
 npm.cmd run test:coverage
-npx.cmd playwright install chromium
+npx.cmd playwright install chromium webkit firefox
 npm.cmd run test:e2e
+npm.cmd run test:e2e:responsive
 npm.cmd run test:e2e:hosts
 npm.cmd run build
 npm.cmd run start
 ```
+
+`npm.cmd run test:e2e:responsive` runs the explicit 26-viewport portrait/landscape/phone/tablet matrix plus iPhone SE, iPhone 13, iPhone 15 Pro Max, Galaxy S9+, Pixel 5, Galaxy S24, and Chromium/WebKit tablets. It checks document overflow, footer edges, header bounds, menus, account/address controls, forms, long content, English/Arabic direction, increased text sizing, tooltips, and tablet admin workflows. A Gecko project is included and can be enabled with `$env:E2E_ENABLE_FIREFOX='true'`; it is excluded from the default Windows release gate because this runner fails inside Playwright before `browserContext.newPage` can create an application page in either headless or headed mode.
 
 Database commands:
 
@@ -147,17 +152,24 @@ Use the seeded administrator credentials from your local `.env`. A normal admini
 
 | Workflow | Exact route | Verified steps |
 | --- | --- | --- |
-| Add a product | `/en/admin/products/new` | Open **Products** → **Add product**; enter bilingual content, SKU/slug/category/price/initial stock/states; optionally upload/reorder images or add variants; select **Save changes**. The successful database E2E redirects to the new edit route. |
+| Add a product | `/en/admin/products/new` | Open **Products** → **Add product**; enter bilingual content, SKU, category, price, initial stock, and states; optionally upload/reorder images or add variants; select **Save changes**. Product URLs are generated from the immutable database ID and require no administrator-managed slug. |
 | Edit a product | `/en/admin/products/[id]` | Open a row from `/en/admin/products`; edit metadata or availability; save. Existing stock is deliberately read-only here and remains ledger-owned. The E2E verifies the storefront update and unavailable 404 state. |
+| Manage a product sale | `/en/admin/products/new` or `/en/admin/products/[id]` | Enable **Sale**, choose direct price or percentage, enter the discount and optional start/end dates, review the live normal/final price and status, then save. `/en/admin/products?sale=ACTIVE` filters current sales; customers discover them at `/en/on-sale` and `/ar/on-sale`. No environment variable is required. |
 | Adjust stock | `/en/admin/inventory` | Search a product/variant; select **Adjust stock**; choose delta or exact value; enter a reason; save. The page refreshes current stock and shows previous/delta/new/admin/time in adjustment history. |
 | Confirm an order | `/en/admin/orders/[id]` | Open an order from `/en/admin/orders`; choose **Confirmed** and save. The server validates the transition and deducts inventory once. |
 | Cancel an order | `/en/admin/orders/[id]` | Choose **Cancelled** and save. If inventory was deducted, it is restored once; a repeated cancellation does not duplicate the ledger row. |
+| Verify payment state | `/en/admin/orders/[id]` | The payment dropdown selects the persisted value and supports valid changes only while fulfillment is non-final. Delivered or Cancelled orders show the localized current value and lock explanation without an editable control; the server rechecks the current PostgreSQL status atomically and rejects direct or stale updates. |
+| View ordered product images | `/en/admin/orders/[id]` and `/print` | Each line uses the purchase-time image/alt snapshot, then the current primary image for a legacy row, then the standard JYS placeholder. |
 | Edit shop settings | `/en/admin/settings` | Edit identity, contact, location, hours, currency, default threshold, or homepage promotion; select **Save settings**. Public database values refresh after save. |
 | Edit policies/instructions | `/en/admin/content` | Select Terms, Privacy, No-return, Warranty, Delivery, or Pickup; edit Arabic/English title and content; publish/save. Public policy pages read this record. |
 | Open reports | `/en/admin/reports` | Apply date, order/payment status, fulfillment, category, and day/week/month filters; submit to refresh database-backed metrics, tables, chart data, and insights. |
 | Export CSV | `/en/admin/reports` | Apply filters, then select **Export orders**, **sales**, **products**, **inventory**, or **customers**. Downloads are admin-authorized UTF-8 CSV files and retain the active filters. |
 
-The mobile admin drawer was verified against Products, Add product, Inventory, Orders, Customers, Cities & fees, Content, Settings, and Reports. The full automated paths are in `e2e/database.spec.ts`.
+Storefront product URLs use `/{locale}/product/{productId}`. Delivery checkout collects the destination without calculating or displaying a charge; the delivery provider determines its charge separately. New order totals and all revenue reports equal the sum of product line totals.
+
+Sales require no environment variable. `src/lib/domain/pricing.ts` is the shared price authority: it validates direct-price/percentage input, uses deterministic minor-unit rounding, decides active/scheduled/expired state, and applies the base-product discount ratio to a variant's own override price. Cart and checkout services re-read PostgreSQL pricing; changed cart prices require review before checkout, and `OrderItem.unitPrice` remains the immutable purchase-time value. Customer sale routes are `/en/on-sale` and `/ar/on-sale`.
+
+The mobile admin drawer was verified against Products, Add product, Inventory, Orders, Customers, Cities & areas, Content, Settings, and Reports. The full automated paths are in `e2e/database.spec.ts`.
 
 ## Environment variables
 

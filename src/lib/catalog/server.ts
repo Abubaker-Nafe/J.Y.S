@@ -3,6 +3,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { cache } from "react";
 import { db } from "@/lib/db";
+import { resolveSalePricing } from "@/lib/domain/pricing";
 import { demoCategories, demoProducts, type Category, type Product } from "@/lib/demo/catalog";
 import type { StorefrontSort } from "./query";
 
@@ -27,6 +28,7 @@ export interface StorefrontProductQuery {
   q?: string;
   category?: string;
   available?: boolean;
+  onSale?: boolean;
   sort?: StorefrontSort;
 }
 
@@ -73,14 +75,21 @@ function mapCategory(row: { id: string; slug: string; nameAr: string; nameEn: st
 function mapProduct(product: ProductRow, categories: Category[]): Product {
   const categoryIndex = Math.max(0, categories.findIndex((category) => category.slug === product.category.slug));
   const accent = categoryAccents[categoryIndex % categoryAccents.length] ?? "#756556";
+  const saleConfiguration = { normalPrice: product.price, isOnSale: product.isOnSale, salePrice: product.salePrice, saleStartsAt: product.saleStartsAt, saleEndsAt: product.saleEndsAt, productActive: product.status === "ACTIVE" && product.isAvailable, archived: Boolean(product.archivedAt) };
+  const pricing = resolveSalePricing(saleConfiguration);
   return {
     id: product.id,
-    slug: product.slug,
     sku: product.sku,
     name: { ar: product.nameAr, en: product.nameEn },
     description: { ar: product.descriptionAr, en: product.descriptionEn },
     categorySlug: product.category.slug,
     price: Number(product.price),
+    effectivePrice: Number(pricing.effectivePrice),
+    onSale: pricing.isOnSale,
+    discountPercentage: pricing.discountPercentage,
+    ...(product.saleStartsAt ? { saleStartsAt: product.saleStartsAt.toISOString() } : {}),
+    ...(product.saleEndsAt ? { saleEndsAt: product.saleEndsAt.toISOString() } : {}),
+    ...(product.saleUpdatedAt ? { saleUpdatedAt: product.saleUpdatedAt.toISOString() } : {}),
     stock: product.variants.length
       ? product.variants.filter((variant) => variant.isActive && variant.isAvailable).reduce((total, variant) => total + variant.stockQuantity, 0)
       : product.stockQuantity,
@@ -88,14 +97,20 @@ function mapProduct(product: ProductRow, categories: Category[]): Product {
     createdAt: product.createdAt.toISOString(),
     images: product.images.map((image) => image.url),
     imageAlts: product.images.map((image) => ({ ar: image.altAr || product.nameAr, en: image.altEn || product.nameEn })),
-    variants: product.variants.filter((variant) => variant.isActive).map((variant) => ({
+    variants: product.variants.filter((variant) => variant.isActive).map((variant) => {
+      const variantPricing = resolveSalePricing(saleConfiguration, variant.priceOverride ?? product.price);
+      return {
       id: variant.id,
       sku: variant.sku,
       label: { ar: variant.labelAr, en: variant.labelEn },
       ...(variant.priceOverride === null ? {} : { price: Number(variant.priceOverride) }),
+      effectivePrice: Number(variantPricing.effectivePrice),
+      onSale: variantPricing.isOnSale,
+      discountPercentage: variantPricing.discountPercentage,
       stock: variant.stockQuantity,
       available: variant.isAvailable,
-    })),
+    };
+    }),
     visual: {
       from: "#202225",
       to: accent,
@@ -112,6 +127,7 @@ function normalizeQuery(input: StorefrontProductQuery) {
     q: input.q?.trim().slice(0, 100) ?? "",
     category: input.category?.trim().slice(0, 100) ?? "",
     available: input.available === true,
+    onSale: input.onSale === true,
     sort: input.sort ?? "featured",
   };
 }
@@ -122,11 +138,14 @@ function demoProductPage(input: StorefrontProductQuery): StorefrontProductPage {
   const products = demoProducts.filter((product) => {
     if (query.category && product.categorySlug !== query.category) return false;
     if (query.available && product.stock <= 0) return false;
+    if (query.onSale && !product.onSale) return false;
     return !needle || `${product.name.ar} ${product.name.en} ${product.sku}`.toLocaleLowerCase().includes(needle);
   });
   products.sort((left, right) => {
-    if (query.sort === "low") return left.price - right.price;
-    if (query.sort === "high") return right.price - left.price;
+    if (query.sort === "low") return (left.effectivePrice ?? left.price) - (right.effectivePrice ?? right.price);
+    if (query.sort === "high") return (right.effectivePrice ?? right.price) - (left.effectivePrice ?? left.price);
+    if (query.sort === "discount") return (right.discountPercentage ?? 0) - (left.discountPercentage ?? 0);
+    if (query.sort === "sale-newest") return Date.parse(right.saleUpdatedAt ?? right.createdAt) - Date.parse(left.saleUpdatedAt ?? left.createdAt);
     if (query.sort === "newest") return Date.parse(right.createdAt) - Date.parse(left.createdAt);
     return Number(right.featured) - Number(left.featured) || Date.parse(right.createdAt) - Date.parse(left.createdAt);
   });
@@ -180,6 +199,14 @@ export async function getStorefrontProductsPage(input: StorefrontProductQuery = 
       { variants: { some: { isActive: true, isAvailable: true, stockQuantity: { gt: 0 } } } },
       { variants: { none: {} }, stockQuantity: { gt: 0 } },
     ] });
+    if (query.onSale) {
+      const now = new Date();
+      filters.push(
+        { isOnSale: true, salePrice: { not: null } },
+        { OR: [{ saleStartsAt: null }, { saleStartsAt: { lte: now } }] },
+        { OR: [{ saleEndsAt: null }, { saleEndsAt: { gte: now } }] },
+      );
+    }
     const where: Prisma.ProductWhereInput = {
       status: "ACTIVE",
       isAvailable: true,
@@ -194,6 +221,22 @@ export async function getStorefrontProductsPage(input: StorefrontProductQuery = 
         : query.sort === "newest"
           ? [{ createdAt: "desc" }]
           : [{ isFeatured: "desc" }, { createdAt: "desc" }];
+    const needsEffectivePriceSort = query.onSale || query.sort === "low" || query.sort === "high" || query.sort === "discount" || query.sort === "sale-newest";
+    if (needsEffectivePriceSort) {
+      const rows = await db.product.findMany({ where, orderBy: [{ createdAt: "desc" }], include: productInclude });
+      const products = rows.map((product) => mapProduct(product, categoryResult.categories)).filter((product) => !query.onSale || product.onSale);
+      products.sort((left, right) => {
+        if (query.sort === "low") return (left.effectivePrice ?? left.price) - (right.effectivePrice ?? right.price);
+        if (query.sort === "high") return (right.effectivePrice ?? right.price) - (left.effectivePrice ?? left.price);
+        if (query.sort === "discount") return (right.discountPercentage ?? 0) - (left.discountPercentage ?? 0) || Date.parse(right.saleUpdatedAt ?? right.createdAt) - Date.parse(left.saleUpdatedAt ?? left.createdAt);
+        if (query.sort === "sale-newest") return Date.parse(right.saleUpdatedAt ?? right.createdAt) - Date.parse(left.saleUpdatedAt ?? left.createdAt);
+        return Number(right.featured) - Number(left.featured) || Date.parse(right.createdAt) - Date.parse(left.createdAt);
+      });
+      const total = products.length;
+      const pageCount = Math.max(1, Math.ceil(total / query.pageSize));
+      const page = Math.min(query.page, pageCount);
+      return { products: products.slice((page - 1) * query.pageSize, page * query.pageSize), categories: categoryResult.categories, source: "database", pagination: { page, pageSize: query.pageSize, total, pageCount } };
+    }
     const result = await db.$transaction(async (tx) => {
       const total = await tx.product.count({ where });
       const pageCount = Math.max(1, Math.ceil(total / query.pageSize));
@@ -254,10 +297,14 @@ export const getStorefrontHomeCatalog = cache(async (): Promise<StorefrontCatalo
   }
 });
 
-export const getStorefrontProduct = cache(async (slug: string): Promise<StorefrontProductDetail> => {
+export const getStorefrontHomeSales = cache(async (): Promise<StorefrontProductPage> => {
+  return getStorefrontProductsPage({ onSale: true, sort: "discount", page: 1, pageSize: 4 });
+});
+
+export const getStorefrontProduct = cache(async (productId: string): Promise<StorefrontProductDetail> => {
   if (!configured()) {
     if (process.env.NODE_ENV !== "production") {
-      const product = demoProducts.find((item) => item.slug === slug);
+      const product = demoProducts.find((item) => item.id === productId);
       const category = product ? demoCategories.find((item) => item.slug === product.categorySlug) : undefined;
       const related = product ? demoProducts.filter((item) => item.id !== product.id && item.categorySlug === product.categorySlug).slice(0, 4) : [];
       return { product, category, related, source: "demo" };
@@ -268,7 +315,7 @@ export const getStorefrontProduct = cache(async (slug: string): Promise<Storefro
     const categoryResult = await getStorefrontCategories();
     if (categoryResult.source === "unavailable") return { related: [], source: "unavailable", unavailableReason: categoryResult.unavailableReason };
     const row = await db.product.findFirst({
-      where: { slug, status: "ACTIVE", isAvailable: true, archivedAt: null, category: { isActive: true, archivedAt: null } },
+      where: { id: productId, status: "ACTIVE", isAvailable: true, archivedAt: null, category: { isActive: true, archivedAt: null } },
       include: productInclude,
     });
     if (!row) return { related: [], source: "database" };

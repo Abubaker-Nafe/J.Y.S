@@ -7,11 +7,12 @@ describe("getAllowedDevOrigins", () => {
   });
 
   it("accepts safe comma-separated local aliases and removes duplicates", () => {
-    expect(getAllowedDevOrigins("jys.com, JYS.COM, shop.test")).toEqual([
+    expect(getAllowedDevOrigins("jys.com, JYS.COM, 192.168.1.50, example-tunnel.ngrok-free.app")).toEqual([
       "127.0.0.1",
       "localhost",
       "jys.com",
-      "shop.test",
+      "192.168.1.50",
+      "example-tunnel.ngrok-free.app",
     ]);
   });
 
@@ -20,5 +21,9 @@ describe("getAllowedDevOrigins", () => {
       "127.0.0.1",
       "localhost",
     ]);
+  });
+
+  it("does not hardcode machine-specific LAN or tunnel hostnames", () => {
+    expect(getAllowedDevOrigins("")).toEqual(["127.0.0.1", "localhost"]);
   });
 });
